@@ -54,7 +54,7 @@ jobs:
     steps:
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -85,20 +85,30 @@ jobs:
           brew install openssl@3 pkgconf
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
 
-      - name: Build Fritzing
-        id: build
+      # Windows must not run from Git Bash: its /usr/bin/link would shadow the MSVC linker
+      - name: Build Fritzing (Windows)
+        if: matrix.group == 'windows'
+        id: build_windows
+        shell: pwsh
+        env:
+          REF: ${{ inputs.version }}
+        run: ./build.ps1 -Ref "$env:REF" -Platform "${{ matrix.id }}"
+
+      - name: Build Fritzing (macOS, Linux)
+        if: matrix.group != 'windows'
+        id: build_unix
         shell: bash
         env:
           REF: ${{ inputs.version }}
-        run: |
-          if [ "${{ matrix.group }}" = windows ]; then
-            pwsh -NoProfile -File build.ps1 -Ref "$REF" -Platform "${{ matrix.id }}"
-          else
-            bash build.sh "${{ matrix.group }}" "$REF" "${{ matrix.id }}"
-          fi
+        run: bash build.sh "${{ matrix.group }}" "$REF" "${{ matrix.id }}"
+
+      - name: Version
+        id: build
+        shell: bash
+        run: echo "FRITZING_VERSION=${{ steps.build_windows.outputs.FRITZING_VERSION || steps.build_unix.outputs.FRITZING_VERSION }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: fritzing-${{ steps.build.outputs.FRITZING_VERSION }}-${{ matrix.id }}
           path: github
