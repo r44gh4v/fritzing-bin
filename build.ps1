@@ -24,6 +24,16 @@ if ($Ref -eq "stable") {
   if (-not $Ref) { throw "could not find the latest stable version" }
 }
 
+# Load the Visual Studio x64 build environment if this is not already a developer prompt
+if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
+  $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
+    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  if (-not $vs) { throw "Visual Studio with C++ tools not found" }
+  cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+    if ($_ -match '^([^=]+)=(.*)$') { Set-Item "Env:$($Matches[1])" $Matches[2] }
+  }
+}
+
 foreach ($tool in "cl", "qmake", "lrelease", "cmake", "git", "7z", "curl") {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "'$tool' not found in PATH" }
 }

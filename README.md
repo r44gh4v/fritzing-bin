@@ -56,7 +56,7 @@ These platforms are not available:
 
 You can also run the scripts on your computer. You must install Qt 6 (6.5.3 to 6.10), CMake, Git and a C++ compiler.
 
-- Windows, in a Visual Studio x64 developer prompt: `pwsh build.ps1`
+- Windows (Visual Studio with C++ tools, Qt `bin` folder on PATH): `pwsh build.ps1`
 - Linux: `bash build.sh linux`
 - macOS: `bash build.sh macos`
 
