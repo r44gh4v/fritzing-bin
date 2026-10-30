@@ -18,7 +18,7 @@ This project is not part of the Fritzing project. It does not change the Fritzin
 5. Optional: type a Fritzing version. If you leave this field empty, you get the latest stable version.
 6. Select **Run workflow**.
 7. Wait for the build to finish. This takes approximately 30 to 60 minutes.
-8. Open the run. Download your build from the **Artifacts** section.
+8. Open the run. Download your build from the **Artifacts** section. GitHub deletes it after 2 days.
 
 To make a newer build, do steps 3 to 8 again.
 
