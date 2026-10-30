@@ -26,7 +26,7 @@ To make a newer build, do steps 3 to 8 again.
 
 | Platform | File | Start Fritzing |
 |---|---|---|
-| Windows (64-bit) | folder | Run `Fritzing.exe`. |
+| Windows (64-bit) | `.zip` | Unzip. Run `Fritzing.exe`. |
 | macOS (Apple Silicon) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
 | macOS (Intel) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
 | Linux (x64) | `.tar.gz` | Extract. Run `./Fritzing`. |

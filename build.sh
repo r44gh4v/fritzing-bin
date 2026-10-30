@@ -161,6 +161,10 @@ if [ "$OS" = linux ]; then
   cp "$APP/Fritzing.sh" "$D/Fritzing"; chmod +x "$D/Fritzing"
   cp "$APP/Fritzing.1" "$APP/org.fritzing.Fritzing.desktop" "$APP/org.fritzing.Fritzing.appdata.xml" "$D/"
   mkdir -p "$D/icons" && cp "$APP"/resources/system_icons/linux/* "$D/icons/"
+  # fail now, not on the user's PC, if a bundled binary needs a library that is neither bundled nor system
+  MISSING="$(find "$L" -type f \( -name Fritzing -o -name '*.so*' \) -exec sh -c \
+    'LD_LIBRARY_PATH="$1" ldd "$2" 2>/dev/null | grep "not found" | sed "s#^#$2: #"' _ "$L" {} \;)"
+  [ -z "$MISSING" ] || { echo "missing libraries in package:" >&2; echo "$MISSING" >&2; exit 1; }
   ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen; build_parts_db "$L/Fritzing" "$D" )
   # tar keeps the executable bits that a plain artifact zip would drop
   tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME" && rm -rf "$D"

@@ -107,11 +107,12 @@ jobs:
         shell: bash
         run: echo "FRITZING_VERSION=${{ steps.build_windows.outputs.FRITZING_VERSION || steps.build_unix.outputs.FRITZING_VERSION }}" >> "$GITHUB_OUTPUT"
 
+      # archive: false = the download is the build file itself, not a zip around it
       - name: Upload
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
-          name: fritzing-${{ steps.build.outputs.FRITZING_VERSION }}-${{ matrix.id }}
-          path: github
+          path: github/*
+          archive: false
           if-no-files-found: error
 
       - name: Summary
@@ -119,10 +120,10 @@ jobs:
         run: |
           {
             echo "### ${{ matrix.label }}: Fritzing ${{ steps.build.outputs.FRITZING_VERSION }}"
-            echo "Download **fritzing-${{ steps.build.outputs.FRITZING_VERSION }}-${{ matrix.id }}** from the *Artifacts* section below."
+            echo "Download **$(ls github)** from the *Artifacts* section below."
             case "${{ matrix.group }}" in
-              windows) echo "Unzip, then run \`Fritzing.exe\`." ;;
-              linux)   echo "Unzip, then \`tar xzf\` the .tar.gz inside and run \`./Fritzing\`." ;;
-              macos)   echo "Unzip twice to get Fritzing.app. First launch: right-click > Open (the build is not notarized)." ;;
+              windows) echo "Unzip it, then run \`Fritzing.exe\`." ;;
+              linux)   echo "Extract it (\`tar xzf\`), then run \`./Fritzing\`." ;;
+              macos)   echo "Unzip it to get Fritzing.app. First launch: right-click > Open (Apple did not check this build)." ;;
             esac
           } >> "$GITHUB_STEP_SUMMARY"

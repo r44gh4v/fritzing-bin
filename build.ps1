@@ -141,7 +141,17 @@ New-Item -ItemType Directory $out | Out-Null
 Copy-Item $exe.FullName $out
 Copy-Item "$quazipDir\bin\*.dll" $out  # before windeployqt, so it also deploys QuaZip's Qt dependencies
 Run { windeployqt --release --compiler-runtime --no-translations "$out\Fritzing.exe" }
+# windeployqt does not follow non-Qt DLLs, so deploy QuaZip's Qt dependencies (Core5Compat) separately
+Get-ChildItem "$out\quazip*.dll" | ForEach-Object { Run { windeployqt --release --no-translations --dir $out $_.FullName } }
 Copy-Item "$root\ngspice-42\bin\*.dll" $out  # ngspice.dll is loaded at runtime from the exe folder
+
+# Fail now, not on the user's PC, if any DLL that the exe or a bundled DLL imports is missing
+$missing = foreach ($bin in Get-ChildItem $out -Include *.exe, *.dll -Recurse) {
+  dumpbin /nologo /dependents $bin.FullName | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' } |
+    Where-Object { -not (Test-Path "$out\$_") -and -not (Test-Path "$env:SystemRoot\System32\$_") -and $_ -notmatch '^(api|ext)-ms-' } |
+    ForEach-Object { "$($bin.Name) -> $_" }
+}
+if ($missing) { throw "missing DLLs in package:`n$($missing -join "`n")" }
 
 $app = "$root\fritzing-app"
 foreach ($d in "sketches", "translations", "help") { Copy-Item "$app\$d" "$out\$d" -Recurse }
@@ -167,5 +177,9 @@ if ($p.ExitCode -ne 0 -or -not (Test-Path "$out\fritzing-parts\parts.db")) {
   Write-Warning "could not pre-build parts.db; Fritzing will build it on first start"
 }
 Remove-Item "$out\platforms\qoffscreen.dll"
+
+# one .zip per build, so the download is the file itself
+Run { 7z a -tzip -bso0 "$out.zip" $out }
+Remove-Item $out -Recurse -Force
 
 "FRITZING_VERSION=$version" | Out-File -Append -Encoding ascii $env:GITHUB_OUTPUT
