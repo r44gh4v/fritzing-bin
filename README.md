@@ -30,9 +30,8 @@ To make a newer build, do steps 3 to 8 again.
 | macOS (Apple Silicon) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
 | macOS (Intel) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
 | Linux (x64) | `.tar.gz` | Extract. Run `./Fritzing`. |
-| Linux (ARM64) | `.tar.gz` | Extract. Run `./Fritzing`. |
 
-You can also select **All macOS**, **All Linux** or **Everything**.
+You can also select **All macOS** or **Everything**.
 
 On macOS, you must use right-click and **Open** the first time. Apple did not check this build.
 
@@ -41,6 +40,7 @@ On Linux, the computer must have glibc 2.35 or newer (Ubuntu 22.04 or newer, for
 These platforms are not available:
 
 - **32-bit Windows.** Fritzing needs Qt 6. Qt 6 does not support 32-bit Windows.
+- **Linux on ARM.** The build did not work in tests.
 - **Windows on ARM.** The ngspice simulator library is not available for this platform. Use the Windows (64-bit) build. It runs on ARM computers through emulation.
 
 ## Versions

@@ -12,9 +12,7 @@ on:
           - "macOS (Apple Silicon)"
           - "macOS (Intel)"
           - "Linux (x64)"
-          - "Linux (ARM64)"
           - "All macOS"
-          - "All Linux"
           - "Everything"
       version:
         description: "Fritzing version. Leave empty for the latest stable version. Or type a version (1.0.7), \"develop\", or a fritzing-app branch or tag."
@@ -35,13 +33,11 @@ jobs:
             {"id":"windows-x64", "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",     "qt_host":"windows",     "qt_arch":"win64_msvc2022_64"},
             {"id":"macos-arm64", "label":"macOS (Apple Silicon)", "group":"macos",   "runner":"macos-15",         "qt_host":"mac",         "qt_arch":"clang_64"},
             {"id":"macos-x64",   "label":"macOS (Intel)",         "group":"macos",   "runner":"macos-15-intel",   "qt_host":"mac",         "qt_arch":"clang_64"},
-            {"id":"linux-x64",   "label":"Linux (x64)",           "group":"linux",   "runner":"ubuntu-22.04",     "qt_host":"linux",       "qt_arch":"linux_gcc_64"},
-            {"id":"linux-arm64", "label":"Linux (ARM64)",         "group":"linux",   "runner":"ubuntu-22.04-arm", "qt_host":"linux_arm64", "qt_arch":"linux_gcc_arm64"}
+            {"id":"linux-x64",   "label":"Linux (x64)",           "group":"linux",   "runner":"ubuntu-22.04",     "qt_host":"linux",       "qt_arch":"linux_gcc_64"}
           ]'
           case "$CHOICE" in
             "Everything") filter='.' ;;
             "All macOS")  filter='map(select(.group=="macos"))' ;;
-            "All Linux")  filter='map(select(.group=="linux"))' ;;
             *)            filter='map(select(.label==env.CHOICE))' ;;
           esac
           echo "matrix=$(jq -c "$filter" <<<"$all")" >> "$GITHUB_OUTPUT"
@@ -66,7 +62,7 @@ jobs:
           version: "6.8.3"  # phoenix.pro accepts 6.5.3 .. 6.10.x
           host: ${{ matrix.qt_host }}
           arch: ${{ matrix.qt_arch }}
-          modules: qtserialport
+          modules: qtserialport qt5compat
           cache: true
 
       - name: Install build tools (Windows)
