@@ -1,0 +1,10 @@
+# everything build.sh / build.ps1 downloads or creates
+/*
+!/.github/
+!/.gitattributes
+!/.gitignore
+!/build.ps1
+!/build.sh
+!/LICENSE
+!/README.md
+!/SOURCE.txt

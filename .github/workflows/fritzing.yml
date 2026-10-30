@@ -1,0 +1,122 @@
+name: fritzing
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which build do you want?"
+        type: choice
+        default: "Windows (64-bit)"
+        options:
+          - "Windows (64-bit)"
+          - "macOS (Apple Silicon)"
+          - "macOS (Intel)"
+          - "Linux (x64)"
+          - "Linux (ARM64)"
+          - "All macOS"
+          - "All Linux"
+          - "Everything"
+      version:
+        description: "Fritzing version. Leave empty for the latest stable version. Or type a version (1.0.7), \"develop\", or a fritzing-app branch or tag."
+        required: false
+
+jobs:
+  # Turns the friendly choice above into a list of build targets.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          CHOICE: ${{ inputs.platform }}
+        run: |
+          all='[
+            {"id":"windows-x64", "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",     "qt_host":"windows",     "qt_arch":"win64_msvc2022_64"},
+            {"id":"macos-arm64", "label":"macOS (Apple Silicon)", "group":"macos",   "runner":"macos-15",         "qt_host":"mac",         "qt_arch":"clang_64"},
+            {"id":"macos-x64",   "label":"macOS (Intel)",         "group":"macos",   "runner":"macos-15-intel",   "qt_host":"mac",         "qt_arch":"clang_64"},
+            {"id":"linux-x64",   "label":"Linux (x64)",           "group":"linux",   "runner":"ubuntu-22.04",     "qt_host":"linux",       "qt_arch":"linux_gcc_64"},
+            {"id":"linux-arm64", "label":"Linux (ARM64)",         "group":"linux",   "runner":"ubuntu-22.04-arm", "qt_host":"linux_arm64", "qt_arch":"linux_gcc_arm64"}
+          ]'
+          case "$CHOICE" in
+            "Everything") filter='.' ;;
+            "All macOS")  filter='map(select(.group=="macos"))' ;;
+            "All Linux")  filter='map(select(.group=="linux"))' ;;
+            *)            filter='map(select(.label==env.CHOICE))' ;;
+          esac
+          echo "matrix=$(jq -c "$filter" <<<"$all")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"  # phoenix.pro accepts 6.5.3 .. 6.10.x
+          host: ${{ matrix.qt_host }}
+          arch: ${{ matrix.qt_arch }}
+          modules: qtserialport
+          cache: true
+
+      - name: Install build tools (Windows)
+        if: matrix.group == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install build tools (Linux)
+        if: matrix.group == 'linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq build-essential cmake pkg-config unzip libssl-dev libudev-dev \
+            libgl1-mesa-dev libfontconfig1-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+
+      - name: Install build tools (macOS)
+        if: matrix.group == 'macos'
+        run: |
+          brew install openssl@3 pkgconf
+          echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Build Fritzing
+        id: build
+        shell: bash
+        env:
+          REF: ${{ inputs.version }}
+        run: |
+          if [ "${{ matrix.group }}" = windows ]; then
+            pwsh -NoProfile -File build.ps1 -Ref "$REF" -Platform "${{ matrix.id }}"
+          else
+            bash build.sh "${{ matrix.group }}" "$REF" "${{ matrix.id }}"
+          fi
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: fritzing-${{ steps.build.outputs.FRITZING_VERSION }}-${{ matrix.id }}
+          path: github
+          if-no-files-found: error
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.label }}: Fritzing ${{ steps.build.outputs.FRITZING_VERSION }}"
+            echo "Download **fritzing-${{ steps.build.outputs.FRITZING_VERSION }}-${{ matrix.id }}** from the *Artifacts* section below."
+            case "${{ matrix.group }}" in
+              windows) echo "Unzip, then run \`Fritzing.exe\`." ;;
+              linux)   echo "Unzip, then \`tar xzf\` the .tar.gz inside and run \`./Fritzing\`." ;;
+              macos)   echo "Unzip twice to get Fritzing.app. First launch: right-click > Open (the build is not notarized)." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,13 @@
+This is an unofficial build of Fritzing @VERSION@ (fritzing-app ref: @REF@).
+The Fritzing project did not make this build. The source code is not changed.
+
+Source code:
+  Application:   https://github.com/fritzing/fritzing-app   (GPL v3)
+  Parts library: https://github.com/fritzing/fritzing-parts (CC BY-SA 3.0)
+
+This build also contains:
+  Qt 6 (LGPL v3), libgit2 (GPL v2 with linking exception), QuaZip (LGPL),
+  ngspice (BSD), Clipper (Boost), Boost (Boost), svgpp (Boost).
+The license texts are in the LICENSE files in this folder.
+
+Official builds and support: https://fritzing.org
