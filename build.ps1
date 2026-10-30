@@ -68,12 +68,22 @@ if (-not (Test-Path "Clipper1-6.4.2\lib")) {
   Run { cmake --install clipper-build }
 }
 
+# --- zlib 1.3.1, static, for QuaZip (Windows has no system zlib) ---
+if (-not (Test-Path "zlib\lib")) {
+  Run { git clone --quiet --depth 1 --branch v1.3.1 https://github.com/madler/zlib.git zlib-src }
+  Run { cmake -G Ninja -S zlib-src -B zlib-build -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_POLICY_VERSION_MINIMUM="3.5" "-DCMAKE_INSTALL_PREFIX=$root\zlib" }
+  Run { cmake --build zlib-build }
+  Run { cmake --install zlib-build }
+}
+
 # --- QuaZip 1.4 built against the same Qt (dir name is what pri/quazipdetect.pri expects) ---
 $quazipDir = "$root\quazip-$qtVersion-1.4intuisphere"
 if (-not (Test-Path "$quazipDir\lib")) {
   Run { git clone --quiet --depth 1 --branch v1.4 https://github.com/stachenov/quazip.git quazip-src }
   Run { cmake -G Ninja -S quazip-src -B quazip-build -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DQUAZIP_QT_MAJOR_VERSION=6 -DQUAZIP_FETCH_LIBS=ON `
+      "-DZLIB_ROOT=$root\zlib" -DZLIB_USE_STATIC_LIBS=ON `
       -DQUAZIP_ENABLE_TESTS=OFF "-DCMAKE_PREFIX_PATH=$qtPrefix" "-DCMAKE_INSTALL_PREFIX=$quazipDir" }
   Run { cmake --build quazip-build }
   Run { cmake --install quazip-build }
@@ -81,7 +91,7 @@ if (-not (Test-Path "$quazipDir\lib")) {
 
 # --- ngspice 42: prebuilt shared library (headers for the build, ngspice.dll for runtime) ---
 if (-not (Test-Path "ngspice-42\include")) {
-  Fetch "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/42/ngspice-42_dll_64.7z" "ngspice.7z"
+  Fetch "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/42/ngspice-42_dll_64.7z" "ngspice.7z"
   Run { 7z x -y -bso0 -ongspice-tmp ngspice.7z }
   $dllRoot = (Get-ChildItem ngspice-tmp -Directory | Select-Object -First 1).FullName
   New-Item -ItemType Directory ngspice-42 | Out-Null

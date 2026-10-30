@@ -76,7 +76,7 @@ fi
 
 # --- ngspice 42 as a shared library (headers for the build, libngspice for runtime simulation) ---
 if [ ! -d ngspice-42/lib ]; then
-  fetch https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/42/ngspice-42.tar.gz ngspice.tar.gz
+  fetch https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/42/ngspice-42.tar.gz ngspice.tar.gz
   mkdir -p ngspice-src && tar xzf ngspice.tar.gz -C ngspice-src --strip-components=1
   ( cd ngspice-src && ./configure --with-ngshared --without-x --with-readline=no --disable-debug \
       --prefix="$ROOT/ngspice-42" && make -j"$JOBS" && make install )
