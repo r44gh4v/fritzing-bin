@@ -3,7 +3,7 @@
 # Dependencies are placed as siblings of fritzing-app, as phoenix.pro's *.pri detect scripts expect.
 # Counterpart of build.sh (Linux/macOS); keep dependency versions in sync with it.
 param(
-  [string]$Ref = "",                 # git ref of fritzing-app to build (branch/tag), empty = develop
+  [string]$Ref = "",                 # git ref of fritzing-app to build (branch/tag), empty = latest stable
   [string]$Platform = "windows-x64"  # used in output names
 )
 $ErrorActionPreference = "Stop"
@@ -47,13 +47,25 @@ if (-not (Test-Path "svgpp-1.3.1")) {
   Run { git clone --quiet --depth 1 --branch v1.3.1 https://github.com/svgpp/svgpp.git svgpp-1.3.1 }
 }
 
+# --- zlib 1.3.1, static. Windows has no system zlib; libgit2, QuaZip and Fritzing (src/zlibdummy.c) need it ---
+if (-not (Test-Path "zlib\lib\zlib.lib")) {
+  Run { git clone --quiet --depth 1 --branch v1.3.1 https://github.com/madler/zlib.git zlib-src }
+  Run { cmake -G Ninja -S zlib-src -B zlib-build -DCMAKE_BUILD_TYPE=Release `
+      -DCMAKE_POLICY_VERSION_MINIMUM="3.5" "-DCMAKE_INSTALL_PREFIX=$root\zlib" }
+  Run { cmake --build zlib-build }
+  Run { cmake --install zlib-build }
+  # keep only the static library, under the name every consumer looks for
+  Copy-Item -Force zlib\lib\zlibstatic.lib zlib\lib\zlib.lib
+  Remove-Item zlib\bin -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 # --- libgit2 1.7.1, static (Windows uses the static variant) ---
 if (-not (Test-Path "libgit2-1.7.1\lib\git2.lib")) {
   Run { git clone --quiet --depth 1 --branch v1.7.1 https://github.com/libgit2/libgit2.git libgit2-src }
   Run { cmake -G Ninja -S libgit2-src -B libgit2-build -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF -DBUILD_CLI=OFF `
-      -DUSE_HTTPS=WinHTTP -DUSE_SSH=OFF -DREGEX_BACKEND=builtin -DSTATIC_CRT=OFF `
-      "-DCMAKE_INSTALL_PREFIX=$root\libgit2-1.7.1" }
+      -DUSE_HTTPS=WinHTTP -DUSE_SSH=OFF -DUSE_GSSAPI=OFF -DREGEX_BACKEND=builtin -DSTATIC_CRT=OFF `
+      -DUSE_BUNDLED_ZLIB=OFF "-DCMAKE_PREFIX_PATH=$root\zlib" "-DCMAKE_INSTALL_PREFIX=$root\libgit2-1.7.1" }
   Run { cmake --build libgit2-build }
   Run { cmake --install libgit2-build }
 }
@@ -68,23 +80,13 @@ if (-not (Test-Path "Clipper1-6.4.2\lib")) {
   Run { cmake --install clipper-build }
 }
 
-# --- zlib 1.3.1, static, for QuaZip (Windows has no system zlib) ---
-if (-not (Test-Path "zlib\lib")) {
-  Run { git clone --quiet --depth 1 --branch v1.3.1 https://github.com/madler/zlib.git zlib-src }
-  Run { cmake -G Ninja -S zlib-src -B zlib-build -DCMAKE_BUILD_TYPE=Release `
-      -DCMAKE_POLICY_VERSION_MINIMUM="3.5" "-DCMAKE_INSTALL_PREFIX=$root\zlib" }
-  Run { cmake --build zlib-build }
-  Run { cmake --install zlib-build }
-}
-
 # --- QuaZip 1.4 built against the same Qt (dir name is what pri/quazipdetect.pri expects) ---
 $quazipDir = "$root\quazip-$qtVersion-1.4intuisphere"
 if (-not (Test-Path "$quazipDir\lib")) {
   Run { git clone --quiet --depth 1 --branch v1.4 https://github.com/stachenov/quazip.git quazip-src }
   Run { cmake -G Ninja -S quazip-src -B quazip-build -DCMAKE_BUILD_TYPE=Release `
       -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DQUAZIP_QT_MAJOR_VERSION=6 -DQUAZIP_FETCH_LIBS=ON `
-      "-DZLIB_ROOT=$root\zlib" -DZLIB_USE_STATIC_LIBS=ON `
-      -DQUAZIP_ENABLE_TESTS=OFF "-DCMAKE_PREFIX_PATH=$qtPrefix" "-DCMAKE_INSTALL_PREFIX=$quazipDir" }
+      -DQUAZIP_ENABLE_TESTS=OFF "-DCMAKE_PREFIX_PATH=$qtPrefix;$root\zlib" "-DCMAKE_INSTALL_PREFIX=$quazipDir" }
   Run { cmake --build quazip-build }
   Run { cmake --install quazip-build }
 }
@@ -96,7 +98,7 @@ if (-not (Test-Path "ngspice-42\include")) {
   $dllRoot = (Get-ChildItem ngspice-tmp -Directory | Select-Object -First 1).FullName
   New-Item -ItemType Directory ngspice-42 | Out-Null
   Copy-Item "$dllRoot\include" ngspice-42\include -Recurse
-  Copy-Item "$dllRoot\bin" ngspice-42\bin -Recurse
+  Copy-Item "$dllRoot\dll-vs" ngspice-42\bin -Recurse  # ngspice.dll + its OpenMP runtime
 }
 
 # --- fritzing-app and fritzing-parts ---
@@ -118,10 +120,14 @@ if ($Ref -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 # --- build ---
-# pri/gitversion.pri shells out to `git describe`; fritzing-app's .git is a sibling dir, so it works as-is.
+# pri/gitversion.pri treats CI=true as a Travis build and makes a broken version string; use `git describe` instead
+Remove-Item Env:CI -ErrorAction SilentlyContinue
+$z = "$root\zlib" -replace '\\', '/'
 Push-Location fritzing-app
 Run { lrelease phoenix.pro }  # translations/*.qm are not committed
-Run { qmake -o Makefile phoenix.pro "CONFIG+=release" }
+# static libgit2 needs these Windows libraries, which pri/libgit2detect.pri does not add
+Run { qmake -o Makefile phoenix.pro "CONFIG+=release" "QMAKE_TARGET.arch=x86_64" "INCLUDEPATH+=$z/include" `
+    "LIBS+=-L$z/lib -lzlib -lwinhttp -lrpcrt4 -lcrypt32 -lole32 -lsecur32 -ladvapi32 -lws2_32" }
 Run { nmake release }
 Pop-Location
 
@@ -133,11 +139,9 @@ $out = "$root\github\fritzing-$version-$Platform"
 if (Test-Path "$root\github") { Remove-Item "$root\github" -Recurse -Force }
 New-Item -ItemType Directory $out | Out-Null
 Copy-Item $exe.FullName $out
+Copy-Item "$quazipDir\bin\*.dll" $out  # before windeployqt, so it also deploys QuaZip's Qt dependencies
 Run { windeployqt --release --compiler-runtime --no-translations "$out\Fritzing.exe" }
-
-Copy-Item "$quazipDir\lib\*.dll" $out -ErrorAction SilentlyContinue
-Copy-Item "$root\ngspice-42\bin\*.dll" $out -ErrorAction SilentlyContinue
-if (Test-Path "$out\ngspice.dll") { } elseif (Test-Path "$out\libngspice-0.dll") { Copy-Item "$out\libngspice-0.dll" "$out\ngspice.dll" }
+Copy-Item "$root\ngspice-42\bin\*.dll" $out  # ngspice.dll is loaded at runtime from the exe folder
 
 $app = "$root\fritzing-app"
 foreach ($d in "sketches", "translations", "help") { Copy-Item "$app\$d" "$out\$d" -Recurse }
@@ -152,9 +156,16 @@ foreach ($f in "README.md", "INSTALL.txt", "LICENSE.GPL2", "LICENSE.GPL3", "LICE
 (Get-Content "$root\SOURCE.txt" -Raw).Replace("@VERSION@", $version).Replace("@REF@", $Ref) |
   Set-Content "$out\SOURCE.txt"
 
-# Pre-build the parts database, as the upstream release script does.
+# Pre-build the parts database, as the upstream release script does. Run headless with a
+# temporary copy of Qt's offscreen plugin, and give up after 10 minutes.
+Copy-Item "$qtPrefix\plugins\platforms\qoffscreen.dll" "$out\platforms\"
 $env:QT_QPA_PLATFORM = "offscreen"
-& "$out\Fritzing.exe" -db "$out\fritzing-parts\parts.db" -pp "$out\fritzing-parts" -f "$out"
-if ($LASTEXITCODE -ne 0) { Write-Warning "could not pre-build parts.db; Fritzing will build it on first start" }
+$p = Start-Process "$out\Fritzing.exe" -PassThru -NoNewWindow `
+  -ArgumentList "-db", "`"$out\fritzing-parts\parts.db`"", "-pp", "`"$out\fritzing-parts`"", "-f", "`"$out`""
+if (-not $p.WaitForExit(600000)) { $p.Kill(); $p.WaitForExit() }
+if ($p.ExitCode -ne 0 -or -not (Test-Path "$out\fritzing-parts\parts.db")) {
+  Write-Warning "could not pre-build parts.db; Fritzing will build it on first start"
+}
+Remove-Item "$out\platforms\qoffscreen.dll"
 
 "FRITZING_VERSION=$version" | Out-File -Append -Encoding ascii $env:GITHUB_OUTPUT

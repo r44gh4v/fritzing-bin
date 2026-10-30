@@ -45,7 +45,7 @@ if [ ! -d libgit2-1.7.1/lib ]; then
   [ -d libgit2-src ] || git clone --quiet --depth 1 --branch v1.7.1 https://github.com/libgit2/libgit2.git libgit2-src
   if [ "$OS" = macos ]; then LG_SHARED=OFF; LG_HTTPS=SecureTransport; else LG_SHARED=ON; LG_HTTPS=OpenSSL; fi
   cmake -S libgit2-src -B libgit2-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DBUILD_SHARED_LIBS=$LG_SHARED -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=$LG_HTTPS -DUSE_SSH=OFF \
+    -DBUILD_SHARED_LIBS=$LG_SHARED -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=$LG_HTTPS -DUSE_SSH=OFF -DUSE_GSSAPI=OFF \
     -DREGEX_BACKEND=builtin -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib \
     -DCMAKE_INSTALL_PREFIX="$ROOT/libgit2-1.7.1"
   cmake --build libgit2-build -j"$JOBS"
@@ -78,7 +78,7 @@ fi
 if [ ! -d ngspice-42/lib ]; then
   fetch https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/42/ngspice-42.tar.gz ngspice.tar.gz
   mkdir -p ngspice-src && tar xzf ngspice.tar.gz -C ngspice-src --strip-components=1
-  ( cd ngspice-src && ./configure --with-ngshared --without-x --with-readline=no --disable-debug \
+  ( cd ngspice-src && ./configure --with-ngshared --without-x --with-readline=no --disable-debug --disable-openmp \
       --prefix="$ROOT/ngspice-42" && make -j"$JOBS" && make install )
 fi
 
@@ -97,6 +97,7 @@ QMAKE_EXTRA=()
 # phoenix.pro asks for a universal x86_64+arm64 app; deps here are built for the host arch only
 [ "$OS" = macos ] && QMAKE_EXTRA=(-after "QMAKE_APPLE_DEVICE_ARCHS=$(uname -m)")
 (
+  unset CI  # pri/gitversion.pri treats CI=true as a Travis build and makes a broken version string
   cd fritzing-app
   lrelease phoenix.pro  # translations/*.qm are not committed
   qmake -o Makefile phoenix.pro CONFIG+=release "${QMAKE_EXTRA[@]}"
@@ -108,7 +109,6 @@ APP="$ROOT/fritzing-app"
 NAME="fritzing-$VERSION-$PLATFORM"
 OUT="$ROOT/github"
 rm -rf "$OUT" && mkdir -p "$OUT"
-export QT_QPA_PLATFORM=offscreen
 export LD_LIBRARY_PATH="$QT_PREFIX/lib:$QUAZIP_DIR/lib:$ROOT/libgit2-1.7.1/lib:$ROOT/ngspice-42/lib:${LD_LIBRARY_PATH:-}"
 
 license_files() {
@@ -120,7 +120,9 @@ license_files() {
 }
 
 build_parts_db() { # $1 = fritzing executable, $2 = release folder (holds fritzing-parts, sketches, ...)
-  "$1" -db "$2/fritzing-parts/parts.db" -pp "$2/fritzing-parts" -f "$2" \
+  # perl alarm = portable 10 minute timeout (macOS has no `timeout`)
+  perl -e 'alarm shift; exec @ARGV' 600 "$1" -db "$2/fritzing-parts/parts.db" -pp "$2/fritzing-parts" -f "$2" \
+    && [ -f "$2/fritzing-parts/parts.db" ] \
     || echo "WARNING: could not pre-build parts.db; Fritzing will build it on first start"
 }
 
@@ -134,8 +136,8 @@ copy_resources() { # same set as upstream's release scripts
 
 if [ "$OS" = linux ]; then
   # same layout as upstream's tools/linux_release_script: binary + libs in lib/, launcher named Fritzing
-  EXE="$(find "$ROOT/release64" "$APP" -maxdepth 1 -type f -name Fritzing 2>/dev/null | head -n1)"
-  [ -n "$EXE" ] || { echo "Fritzing binary not found after build" >&2; exit 1; }
+  EXE="$APP/Fritzing"  # phoenix.pro sets no DESTDIR on Linux
+  [ -f "$EXE" ] || { echo "Fritzing binary not found after build" >&2; exit 1; }
   D="$OUT/$NAME"; L="$D/lib"; mkdir -p "$L"
   cp "$EXE" "$L/Fritzing"; strip "$L/Fritzing"
 
@@ -145,7 +147,7 @@ if [ "$OS" = linux ]; then
   done
   bundle_libs() {
     ldd "$1" 2>/dev/null | awk '/=> \//{print $3}' | while read -r lib; do
-      case "$lib" in "$QT_PREFIX"/*|"$ROOT"/*) cp -nL "$lib" "$L/" ;; esac
+      case "$lib" in "$QT_PREFIX"/*|"$ROOT"/*) [ -e "$L/$(basename "$lib")" ] || cp -L "$lib" "$L/" ;; esac
     done
   }
   bundle_libs "$L/Fritzing"
@@ -159,7 +161,7 @@ if [ "$OS" = linux ]; then
   cp "$APP/Fritzing.sh" "$D/Fritzing"; chmod +x "$D/Fritzing"
   cp "$APP/Fritzing.1" "$APP/org.fritzing.Fritzing.desktop" "$APP/org.fritzing.Fritzing.appdata.xml" "$D/"
   mkdir -p "$D/icons" && cp "$APP"/resources/system_icons/linux/* "$D/icons/"
-  ( export LD_LIBRARY_PATH="$L"; build_parts_db "$L/Fritzing" "$D" )
+  ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen; build_parts_db "$L/Fritzing" "$D" )
   # tar keeps the executable bits that a plain artifact zip would drop
   tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME" && rm -rf "$D"
 
@@ -173,7 +175,7 @@ else # macos
   cp -L "$ROOT"/ngspice-42/lib/libngspice.0.dylib "$S/"
 
   macdeployqt "$D/Fritzing.app" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
-  build_parts_db "$S/Fritzing" "$S"
+  build_parts_db "$S/Fritzing" "$S"  # as upstream: with the normal (cocoa) platform; runners have a GUI session
   # unsigned arm64 binaries do not launch at all; an ad-hoc signature fixes that
   codesign --force --deep --sign - "$D/Fritzing.app"
   ditto -c -k --keepParent "$D/Fritzing.app" "$OUT/$NAME.zip" && rm -rf "$D"
