@@ -4,7 +4,7 @@
 #
 # usage: bash build.sh <linux|macos> [fritzing-app ref] [platform id, used in file names]
 #   ref: empty or "stable" = newest X.Y.Z release, "develop", or any fritzing-app branch/tag
-# Expects Qt 6 (qmake on PATH), a C++ toolchain, cmake, git, curl, unzip, perl, and
+# Expects Qt 6 (qmake on PATH), a C++ toolchain, cmake, git, curl, unzip, python3, and
 # OpenSSL 3 + pkg-config (Linux: libssl-dev, macOS: brew openssl@3).
 # Dependencies are placed as siblings of fritzing-app, as phoenix.pro's *.pri detect scripts expect.
 # Folders that already exist are reused (the workflow caches them).
@@ -16,7 +16,7 @@ PLATFORM="${3:-$OS}"
 ROOT="$(pwd)"
 JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 
-for tool in qmake lrelease cmake git curl unzip tar make perl; do
+for tool in qmake lrelease cmake git curl unzip tar make python3; do
   command -v "$tool" >/dev/null || { echo "'$tool' not found in PATH" >&2; exit 1; }
 done
 
@@ -106,7 +106,8 @@ if [ ! -d "$QUAZIP_DIR/lib" ]; then
   clone_pinned quazip-src v1.4 566fa496649b8cb09018b497575bb3bf2977965f https://github.com/stachenov/quazip.git
   cmake -S quazip-src -B quazip-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DQUAZIP_QT_MAJOR_VERSION=6 -DQUAZIP_FETCH_LIBS=ON -DQUAZIP_ENABLE_TESTS=OFF \
-    -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="$QUAZIP_DIR"
+    -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="$QUAZIP_DIR" \
+    -DCMAKE_INSTALL_RPATH="$QT_PREFIX/lib"  # macdeployqt resolves QuaZip's @rpath Qt links only through this
   cmake --build quazip-build -j"$JOBS"
   cmake --install quazip-build
 fi
@@ -122,12 +123,12 @@ if [ ! -d ngspice-42/lib ]; then
 fi
 
 # --- fritzing-app and fritzing-parts ---
-[ -d fritzing-app ] || retry sh -c 'rm -rf fritzing-app && git clone --quiet https://github.com/fritzing/fritzing-app.git fritzing-app'
+[ -d fritzing-app ] || retry sh -c 'rm -rf fritzing-app && git clone --quiet --filter=blob:none https://github.com/fritzing/fritzing-app.git fritzing-app'
 retry git -C fritzing-app fetch --quiet --tags origin
 git -C fritzing-app checkout --quiet --force "$REF"
 # upstream pairs develop app builds with develop parts, everything else with master
 PARTS_BRANCH=master; [ "$REF" = develop ] && PARTS_BRANCH=develop
-[ -d fritzing-parts ] || retry sh -c 'rm -rf fritzing-parts && git clone --quiet --depth 1 --branch "$1" https://github.com/fritzing/fritzing-parts.git fritzing-parts' _ "$PARTS_BRANCH"
+[ -d fritzing-parts ] || retry sh -c 'rm -rf fritzing-parts && git clone --quiet --single-branch --branch "$1" https://github.com/fritzing/fritzing-parts.git fritzing-parts' _ "$PARTS_BRANCH"
 VERSION="$REF"
 [[ "$REF" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="$(git -C fritzing-app describe --tags 2>/dev/null || echo "$REF")"
 
@@ -135,11 +136,21 @@ VERSION="$REF"
 QMAKE_EXTRA=()
 # phoenix.pro asks for a universal x86_64+arm64 app; deps here are built for the host arch only
 [ "$OS" = macos ] && QMAKE_EXTRA=(-after "QMAKE_APPLE_DEVICE_ARCHS=$(uname -m)")
+# Qt's own ccache support (mkspecs/features/unix/ccache.prf), when ccache is installed
+command -v ccache >/dev/null && QMAKE_EXTRA+=(CONFIG+=ccache)
+# pri/gitversion.pri bakes the current time (to the second) into every compile command as BUILD_DATE,
+# which makes every file a ccache miss. Like SOURCE_DATE_EPOCH, use the commit time instead:
+# a `date` shim on PATH while qmake runs.
+EPOCH="$(git -C fritzing-app log -1 --format=%ct)"
+mkdir -p "$ROOT/date-shim"
+if [ "$OS" = macos ]; then DATE_ARGS="-r $EPOCH"; else DATE_ARGS="-d @$EPOCH"; fi
+printf '#!/bin/sh\nexec /bin/date %s "$@"\n' "$DATE_ARGS" > "$ROOT/date-shim/date"
+chmod +x "$ROOT/date-shim/date"
 (
   unset CI  # pri/gitversion.pri treats CI=true as a Travis build and makes a broken version string
   cd fritzing-app
   lrelease phoenix.pro  # translations/*.qm are not committed
-  qmake -o Makefile phoenix.pro CONFIG+=release ${QMAKE_EXTRA[@]+"${QMAKE_EXTRA[@]}"}
+  PATH="$ROOT/date-shim:$PATH" qmake -o Makefile phoenix.pro CONFIG+=release ${QMAKE_EXTRA[@]+"${QMAKE_EXTRA[@]}"}
   make -j"$JOBS" release  # phoenix.pro is debug_and_release
 )
 
@@ -162,17 +173,45 @@ copy_resources() { # same set as upstream's release scripts
   for d in sketches translations help; do cp -R "$APP/$d" "$1/$d"; done
   rm -f "$1"/translations/*.ts
   find "$1/translations" -name '*.qm' -size -128c -delete
-  cp -R "$ROOT/fritzing-parts" "$1/fritzing-parts"; rm -rf "$1/fritzing-parts/.git"
+  # keep .git, as upstream does: building the parts database reads its commit (PartsChecker::getSha),
+  # and the in-app parts update fetches and merges into it
+  cp -R "$ROOT/fritzing-parts" "$1/fritzing-parts"
   license_files "$1"
+}
+
+# A copy of the parts with malformed XML repaired (see fix_parts_xml.py). Fritzing indexes this copy;
+# the shipped fritzing-parts stays an unmodified clone, which the in-app parts update needs.
+# parts.db stores paths relative to the parts folder, so the database works in the shipped folder.
+fixed_parts_copy() { # $1 = shipped fritzing-parts; prints the copy's path
+  local work; work="$(mktemp -d)"
+  cp -R "$1" "$work/fritzing-parts"
+  python3 -I "$ROOT/fix_parts_xml.py" "$work/fritzing-parts" >&2
+  echo "$work/fritzing-parts"
 }
 
 # Smoke test + parts database, as upstream's release scripts do: the packaged app must start,
 # index all parts and exit. Any missing library or plugin fails the build here, not on the user's PC.
-build_parts_db() { # $1 = fritzing executable, $2 = release folder (holds fritzing-parts, sketches, ...)
-  local db="$2/fritzing-parts/parts.db"
-  # perl alarm = portable 10 minute timeout (macOS has no `timeout`)
-  perl -e 'alarm shift; exec @ARGV' 600 "$1" -db "$db" -pp "$2/fritzing-parts" -f "$2" \
-    || { echo "packaged Fritzing failed to start or to build the parts database" >&2; exit 1; }
+build_parts_db() { # $1 = fritzing executable, $2 = release folder (empty: app finds it), $3 = parts to index, $4 = output db
+  local db="$4" pid n status=0
+  # Fritzing's own qDebug output into the log (default category only, not Qt's internals).
+  # QT_PLUGIN_PATH from install-qt-action would load Qt's plugins instead of the bundled ones.
+  env -u QT_PLUGIN_PATH QT_LOGGING_RULES='*.debug=false;default.debug=true' QT_FORCE_STDERR_LOGGING=1 \
+    "$1" -db "$db" -pp "$3" ${2:+-f "$2"} &
+  pid=$!
+  for ((n = 0; n < 900; n++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$pid" 2>/dev/null; then
+    # still running after 15 minutes: show where it is stuck, then fail
+    echo "Fritzing did not finish in 15 minutes; parts.db size: $(wc -c < "$db" 2>/dev/null || echo none)" >&2
+    if command -v gdb >/dev/null; then
+      sudo gdb -p "$pid" -batch -ex "thread apply all bt 25" 2>&1 | grep -E '^(Thread|#)' | head -150 >&2
+    elif command -v lldb >/dev/null; then
+      sudo lldb -p "$pid" --batch -o "thread backtrace all -c 25" 2>&1 | head -150 >&2
+    fi
+    kill -9 "$pid"
+    exit 1
+  fi
+  wait "$pid" || status=$?
+  [ "$status" -eq 0 ] || { echo "packaged Fritzing failed (exit code $status)" >&2; exit 1; }
   [ "$(wc -c < "$db")" -gt 1000000 ] || { echo "parts database is missing or too small" >&2; exit 1; }
 }
 
@@ -181,7 +220,7 @@ if [ "$OS" = linux ]; then
   EXE="$APP/Fritzing"  # phoenix.pro sets no DESTDIR on Linux
   [ -f "$EXE" ] || { echo "Fritzing binary not found after build" >&2; exit 1; }
   D="$OUT/$NAME"; L="$D/lib"; mkdir -p "$L"
-  cp "$EXE" "$L/Fritzing"; strip "$L/Fritzing"
+  cp "$EXE" "$L/Fritzing"  # stripped after the smoke test, so a stuck run gives a readable stack
 
   # Qt plugins are found next to the executable; then bundle every non-system library needed
   for p in platforms imageformats sqldrivers printsupport xcbglintegrations platforminputcontexts platformthemes iconengines tls; do
@@ -210,24 +249,51 @@ if [ "$OS" = linux ]; then
   cp "$APP/Fritzing.sh" "$D/Fritzing"; chmod +x "$D/Fritzing"
   cp "$APP/Fritzing.1" "$APP/org.fritzing.Fritzing.desktop" "$APP/org.fritzing.Fritzing.appdata.xml" "$D/"
   mkdir -p "$D/icons" && cp "$APP"/resources/system_icons/linux/* "$D/icons/"
-  ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen; build_parts_db "$L/Fritzing" "$D" )
-  # tar keeps the executable bits that a zip would drop
-  tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME" && rm -rf "$D"
+  PARTS_FIXED="$(fixed_parts_copy "$D/fritzing-parts")"
+  ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen
+    build_parts_db "$L/Fritzing" "$D" "$PARTS_FIXED" "$D/fritzing-parts/parts.db" )
+  strip "$L/Fritzing"
+
+  # Turn the folder into an AppImage: one file that runs on most distros. The upstream launcher
+  # already resolves its own folder, so it works as AppRun inside the mounted image.
+  cp "$APP/Fritzing.sh" "$D/AppRun"; chmod +x "$D/AppRun"
+  cp "$APP/resources/system_icons/linux/fritzing_icon.png" "$D/fritzing.png"  # desktop file: Icon=fritzing
+  fetch appimagetool ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 \
+    https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+  # pinned runtime; without --runtime-file appimagetool downloads the unpinned "continuous" one
+  fetch appimage-runtime 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d \
+    https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+  chmod +x appimagetool
+  ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream --runtime-file appimage-runtime \
+    "$D" "$OUT/$NAME.AppImage"
+  chmod +x "$OUT/$NAME.AppImage"
+
+  # smoke test the AppImage itself: it must start and index the parts
+  SMOKE="$(mktemp -d)"
+  ( export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen; cd "$SMOKE"
+    build_parts_db "$OUT/$NAME.AppImage" "$D" "$PARTS_FIXED" "$SMOKE/parts.db" )
+  rm -rf "$SMOKE" "$D" "$(dirname "$PARTS_FIXED")"
 
 else # macos
   BUNDLE="$ROOT/release64/Fritzing.app"  # DESTDIR from phoenix.pro
   [ -d "$BUNDLE" ] || { echo "Fritzing.app not found after build" >&2; exit 1; }
   D="$OUT/$NAME"; mkdir -p "$D"
   cp -R "$BUNDLE" "$D/Fritzing.app"
-  S="$D/Fritzing.app/Contents/MacOS"  # upstream ships resources inside Contents/MacOS
+  # Data goes to Contents/Resources, which Fritzing searches on macOS (FolderUtils::applicationDirPath).
+  # Contents/MacOS may hold only code: codesign rejects folders such as fritzing-parts/.git there.
+  S="$D/Fritzing.app/Contents/Resources"
   copy_resources "$S"
-  cp -L "$ROOT/ngspice-42/lib/libngspice.0.dylib" "$S/"
+  # ngspice is dlopen()ed from the executable's folder
+  cp -L "$ROOT/ngspice-42/lib/libngspice.0.dylib" "$D/Fritzing.app/Contents/MacOS/"
 
-  # Qt's lib folder lets macdeployqt resolve QuaZip's @rpath link to QtCore5Compat
   macdeployqt "$D/Fritzing.app" -libpath="$QT_PREFIX/lib" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
   # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
   find "$D/Fritzing.app/Contents/PlugIns/sqldrivers" -type f ! -name 'libqsqlite.dylib' -delete
-  build_parts_db "$S/Fritzing" "$S"  # as upstream: with the normal (cocoa) platform; runners have a GUI session
+  # as upstream: with the normal (cocoa) platform; runners have a GUI session
+  PARTS_FIXED="$(fixed_parts_copy "$S/fritzing-parts")"
+  # no -f: the app must find Contents/Resources by itself, as it will on the user's Mac
+  build_parts_db "$D/Fritzing.app/Contents/MacOS/Fritzing" "" "$PARTS_FIXED" "$S/fritzing-parts/parts.db"
+  rm -rf "$(dirname "$PARTS_FIXED")"
   # unsigned arm64 binaries do not launch at all; an ad-hoc signature fixes that
   codesign --force --deep --sign - "$D/Fritzing.app"
   codesign --verify --deep --strict "$D/Fritzing.app"

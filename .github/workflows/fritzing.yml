@@ -17,6 +17,15 @@ on:
       version:
         description: "Fritzing version. Leave empty for the latest stable version. Or type a version (1.0.7), \"develop\", or a fritzing-app branch or tag."
         required: false
+  # Development: every push to a work branch that touches the build builds everything
+  push:
+    branches-ignore: [main]
+    paths: [build.sh, build.ps1, fix_parts_xml.py, SOURCE.txt, .github/workflows/fritzing.yml]
+
+# A newer run of the same build on the same branch cancels the older one
+concurrency:
+  group: fritzing-${{ github.ref }}-${{ inputs.platform || 'push' }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -35,7 +44,7 @@ jobs:
     steps:
       - id: plan
         env:
-          CHOICE: ${{ inputs.platform }}
+          CHOICE: ${{ inputs.platform || 'Everything' }}
         run: |
           all='[
             {"id":"windows-x64", "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",   "qt_host":"windows", "qt_arch":"win64_msvc2022_64"},
@@ -87,12 +96,21 @@ jobs:
             ngspice-42
           key: deps-${{ matrix.id }}-qt${{ env.QT_VERSION }}-${{ hashFiles('build.sh', 'build.ps1') }}
 
+      # Compiled Fritzing objects are reused between runs (Windows uses /MP instead, see build.ps1)
+      - name: Compiler cache (macOS, Linux)
+        if: matrix.group != 'windows'
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d  # v1.2.24
+        with:
+          key: ${{ matrix.id }}
+          max-size: 1G
+          evict-old-files: job
+
       - name: Install build tools (Linux)
         if: matrix.group == 'linux'
         run: |
           sudo apt-get -o Acquire::Retries=3 update -q
           sudo apt-get -o Acquire::Retries=3 install -yq build-essential cmake pkg-config unzip libssl-dev libudev-dev \
-            libgl1-mesa-dev libfontconfig1-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            gdb libgl1-mesa-dev libfontconfig1-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
 
       - name: Install build tools (macOS)
@@ -128,12 +146,16 @@ jobs:
       - name: Summary
         shell: bash
         run: |
+          f="$(ls github)"
           {
             echo "### ${{ matrix.label }}"
-            echo "Download **$(ls github)** from the *Artifacts* section below. It is deleted after 2 days."
+            echo "Download **$f** from the *Artifacts* section below. It is deleted after 2 days."
+            echo ""
+            echo "SHA-256: \`$( (sha256sum "github/$f" 2>/dev/null || shasum -a 256 "github/$f") | cut -d' ' -f1)\`"
+            echo ""
             case "${{ matrix.group }}" in
               windows) echo "Unzip it, then run \`Fritzing.exe\`." ;;
-              linux)   echo "Extract it (\`tar xzf\`), then run \`./Fritzing\`." ;;
+              linux)   echo "Make it executable (\`chmod +x\`), then run it. Without FUSE, add \`--appimage-extract-and-run\`." ;;
               macos)   echo "Unzip it to get Fritzing.app. First launch: right-click > Open (Apple did not check this build)." ;;
             esac
           } >> "$GITHUB_STEP_SUMMARY"

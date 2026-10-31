@@ -5,6 +5,7 @@
 !/.gitignore
 !/build.ps1
 !/build.sh
+!/fix_parts_xml.py
 !/LICENSE
 !/README.md
 !/SOURCE.txt

@@ -70,7 +70,7 @@ if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
     }
 }
 
-foreach ($tool in "cl", "link", "nmake", "qmake", "lrelease", "windeployqt", "cmake", "ninja", "git", "7z", "curl", "dumpbin") {
+foreach ($tool in "cl", "link", "nmake", "qmake", "lrelease", "windeployqt", "cmake", "ninja", "git", "7z", "curl", "dumpbin", "python") {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "'$tool' not found in PATH" }
 }
 # Git for Windows ships a Unix `link` tool; make sure the MSVC linker wins
@@ -152,7 +152,7 @@ if (-not (Test-Path "ngspice-42\include")) {
 # --- fritzing-app and fritzing-parts ---
 if (-not (Test-Path "fritzing-app")) {
     Retry { if (Test-Path fritzing-app) { Remove-Item fritzing-app -Recurse -Force }
-        git clone --quiet https://github.com/fritzing/fritzing-app.git fritzing-app }
+        git clone --quiet --filter=blob:none https://github.com/fritzing/fritzing-app.git fritzing-app }
 }
 Retry { git -C fritzing-app fetch --quiet --tags origin }
 Run { git -C fritzing-app checkout --quiet --force $Ref }
@@ -160,7 +160,7 @@ Run { git -C fritzing-app checkout --quiet --force $Ref }
 $partsBranch = if ($Ref -eq "develop") { "develop" } else { "master" }
 if (-not (Test-Path "fritzing-parts")) {
     Retry { if (Test-Path fritzing-parts) { Remove-Item fritzing-parts -Recurse -Force }
-        git clone --quiet --depth 1 --branch $partsBranch https://github.com/fritzing/fritzing-parts.git fritzing-parts }
+        git clone --quiet --single-branch --branch $partsBranch https://github.com/fritzing/fritzing-parts.git fritzing-parts }
 }
 $version = $Ref
 if ($Ref -notmatch '^\d+\.\d+\.\d+$') {
@@ -178,7 +178,10 @@ Run { lrelease phoenix.pro }  # translations/*.qm are not committed
 # static libgit2 needs these Windows libraries, which pri/libgit2detect.pri does not add
 Run { qmake -o Makefile phoenix.pro "CONFIG+=release" "QMAKE_TARGET.arch=x86_64" "INCLUDEPATH+=$z/include" `
         "LIBS+=-L$z/lib -lzlib -lwinhttp -lrpcrt4 -lcrypt32 -lole32 -lsecur32 -ladvapi32 -lws2_32" }
+# nmake runs one job at a time; /MP lets cl compile the files of each batch on all cores
+$env:CL = "/MP"
 Run { nmake release }
+Remove-Item Env:CL
 Pop-Location
 
 $exe = Get-Item "$root\release64\Fritzing.exe" -ErrorAction SilentlyContinue  # DESTDIR from phoenix.pro
@@ -212,8 +215,10 @@ $app = "$root\fritzing-app"
 foreach ($d in "sketches", "translations", "help") { Copy-Item "$app\$d" "$out\$d" -Recurse }
 Remove-Item "$out\translations\*.ts"
 Get-ChildItem "$out\translations\*.qm" | Where-Object { $_.Length -lt 128 } | Remove-Item  # empty translations
-Copy-Item "$root\fritzing-parts" "$out\fritzing-parts" -Recurse
-Remove-Item "$out\fritzing-parts\.git" -Recurse -Force -ErrorAction SilentlyContinue
+# keep .git, as upstream does: building the parts database reads its commit (PartsChecker::getSha),
+# and the in-app parts update fetches and merges into it. -Force: Git for Windows marks .git hidden.
+Copy-Item "$root\fritzing-parts" "$out\fritzing-parts" -Recurse -Force
+if (-not (Test-Path "$out\fritzing-parts\.git\HEAD")) { throw "fritzing-parts\.git was not copied" }
 foreach ($f in "README.md", "INSTALL.txt", "LICENSE.GPL2", "LICENSE.GPL3", "LICENSE.LGPLv3", "LICENSE.CC-BY-SA",
     "LICENSE.Modified_BSD", "LICENSE_1_0.txt.BOOST", "license-openssl-ssleay.txt") {
     if (Test-Path "$app\$f") { Copy-Item "$app\$f" $out }
@@ -222,18 +227,27 @@ foreach ($f in "README.md", "INSTALL.txt", "LICENSE.GPL2", "LICENSE.GPL3", "LICE
 Set-Content "$out\SOURCE.txt"
 
 # Smoke test + parts database, as upstream's release script does: the packaged app must start,
-# index all parts and exit. Run headless with a temporary copy of Qt's offscreen plugin, 10 minute limit.
-Copy-Item "$qtPrefix\plugins\platforms\qoffscreen.dll" "$out\platforms\"
-$env:QT_QPA_PLATFORM = "offscreen"
+# index all parts and exit, within 15 minutes. (Fritzing forces the "windows" Qt platform itself.)
+# It indexes a copy of the parts with malformed XML repaired (see fix_parts_xml.py); the shipped
+# fritzing-parts stays an unmodified clone, which the in-app parts update needs. parts.db stores
+# paths relative to the parts folder, so the database works in the shipped folder.
+$partsFixed = Join-Path ([IO.Path]::GetTempPath()) "fritzing-parts-fixed-$PID"
+Copy-Item "$out\fritzing-parts" $partsFixed -Recurse -Force
+Run { python -I "$root\fix_parts_xml.py" $partsFixed }
+$env:QT_LOGGING_RULES = "*.debug=false;default.debug=true"  # Fritzing's own qDebug output into the log
+$env:QT_FORCE_STDERR_LOGGING = "1"
+$qtPluginPath = $env:QT_PLUGIN_PATH  # set by install-qt-action; would load Qt's plugins, not the bundled ones
+Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
 $db = "$out\fritzing-parts\parts.db"
 $p = Start-Process "$out\Fritzing.exe" -PassThru -NoNewWindow `
-    -ArgumentList "-db", "`"$db`"", "-pp", "`"$out\fritzing-parts`"", "-f", "`"$out`""
+    -ArgumentList "-db", "`"$db`"", "-pp", "`"$partsFixed`"", "-f", "`"$out`""
 $null = $p.Handle  # without this, ExitCode can be empty after the process ends
-if (-not $p.WaitForExit(600000)) { $p.Kill(); throw "packaged Fritzing did not finish building the parts database in 10 minutes" }
+if (-not $p.WaitForExit(900000)) { $p.Kill(); throw "packaged Fritzing did not finish building the parts database in 15 minutes" }
 if ($p.ExitCode -ne 0) { throw "packaged Fritzing failed to start or to build the parts database (exit code $($p.ExitCode))" }
 if (-not (Test-Path $db) -or (Get-Item $db).Length -lt 1MB) { throw "parts database is missing or too small" }
-Remove-Item "$out\platforms\qoffscreen.dll"
-Remove-Item Env:QT_QPA_PLATFORM
+Remove-Item Env:QT_LOGGING_RULES, Env:QT_FORCE_STDERR_LOGGING
+if ($qtPluginPath) { $env:QT_PLUGIN_PATH = $qtPluginPath }
+Remove-Item $partsFixed -Recurse -Force
 
 # one .zip per build, so the download is the file itself
 Run { 7z a -tzip -bso0 "$out.zip" $out }
