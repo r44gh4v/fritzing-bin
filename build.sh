@@ -191,12 +191,12 @@ fixed_parts_copy() { # $1 = shipped fritzing-parts; prints the copy's path
 
 # Smoke test + parts database, as upstream's release scripts do: the packaged app must start,
 # index all parts and exit. Any missing library or plugin fails the build here, not on the user's PC.
-build_parts_db() { # $1 = fritzing executable, $2 = release folder, $3 = parts folder to index, $4 = output db
+build_parts_db() { # $1 = fritzing executable, $2 = release folder (empty: app finds it), $3 = parts to index, $4 = output db
   local db="$4" pid n status=0
   # Fritzing's own qDebug output into the log (default category only, not Qt's internals).
   # QT_PLUGIN_PATH from install-qt-action would load Qt's plugins instead of the bundled ones.
   env -u QT_PLUGIN_PATH QT_LOGGING_RULES='*.debug=false;default.debug=true' QT_FORCE_STDERR_LOGGING=1 \
-    "$1" -db "$db" -pp "$3" -f "$2" &
+    "$1" -db "$db" -pp "$3" ${2:+-f "$2"} &
   pid=$!
   for ((n = 0; n < 900; n++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
   if kill -0 "$pid" 2>/dev/null; then
@@ -279,16 +279,20 @@ else # macos
   [ -d "$BUNDLE" ] || { echo "Fritzing.app not found after build" >&2; exit 1; }
   D="$OUT/$NAME"; mkdir -p "$D"
   cp -R "$BUNDLE" "$D/Fritzing.app"
-  S="$D/Fritzing.app/Contents/MacOS"  # upstream ships resources inside Contents/MacOS
+  # Data goes to Contents/Resources, which Fritzing searches on macOS (FolderUtils::applicationDirPath).
+  # Contents/MacOS may hold only code: codesign rejects folders such as fritzing-parts/.git there.
+  S="$D/Fritzing.app/Contents/Resources"
   copy_resources "$S"
-  cp -L "$ROOT/ngspice-42/lib/libngspice.0.dylib" "$S/"
+  # ngspice is dlopen()ed from the executable's folder
+  cp -L "$ROOT/ngspice-42/lib/libngspice.0.dylib" "$D/Fritzing.app/Contents/MacOS/"
 
   macdeployqt "$D/Fritzing.app" -libpath="$QT_PREFIX/lib" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
   # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
   find "$D/Fritzing.app/Contents/PlugIns/sqldrivers" -type f ! -name 'libqsqlite.dylib' -delete
   # as upstream: with the normal (cocoa) platform; runners have a GUI session
   PARTS_FIXED="$(fixed_parts_copy "$S/fritzing-parts")"
-  build_parts_db "$S/Fritzing" "$S" "$PARTS_FIXED" "$S/fritzing-parts/parts.db"
+  # no -f: the app must find Contents/Resources by itself, as it will on the user's Mac
+  build_parts_db "$D/Fritzing.app/Contents/MacOS/Fritzing" "" "$PARTS_FIXED" "$S/fritzing-parts/parts.db"
   rm -rf "$(dirname "$PARTS_FIXED")"
   # unsigned arm64 binaries do not launch at all; an ad-hoc signature fixes that
   codesign --force --deep --sign - "$D/Fritzing.app"
