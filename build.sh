@@ -74,7 +74,8 @@ echo "Fritzing $VERSION ($REF) with Qt $QT_VERSION for $PLATFORM"
 CMAKE_COMMON=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib)
 if [ "$OS" = macos ]; then
   # one universal app for Intel and Apple Silicon; the oldest macOS is the one Qt supports
-  MACOSX_DEPLOYMENT_TARGET="$(sed -n 's/^ *QMAKE_MACOSX_DEPLOYMENT_TARGET *= *//p' "$QT_PREFIX/mkspecs/common/macx.conf" | head -n1)"
+  MACOSX_DEPLOYMENT_TARGET="$(otool -l "$QT_PREFIX/lib/QtCore.framework/QtCore" | awk '/LC_BUILD_VERSION/{f=1} f&&$1=="minos"{print $2; exit}')"
+  [ -n "$MACOSX_DEPLOYMENT_TARGET" ] || MACOSX_DEPLOYMENT_TARGET="$(grep -rhs '^ *QMAKE_MACOSX_DEPLOYMENT_TARGET *=' "$QT_PREFIX/mkspecs" | head -n1 | sed 's/.*= *//')"
   [ -n "$MACOSX_DEPLOYMENT_TARGET" ] || { echo "cannot read Qt's minimum macOS version" >&2; exit 1; }
   export MACOSX_DEPLOYMENT_TARGET
   CMAKE_COMMON+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET")
