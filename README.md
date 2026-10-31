@@ -29,13 +29,14 @@ To make a newer build, do steps 3 to 8 again.
 | Windows (64-bit) | `.zip` | Unzip. Run `Fritzing.exe`. |
 | macOS (Apple Silicon) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
 | macOS (Intel) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
-| Linux (x64) | `.tar.gz` | Extract. Run `./Fritzing`. |
+| Linux (x64) | `.AppImage` | Make it executable (`chmod +x`). Run it. |
 
 You can also select **All macOS** or **Everything**.
 
 On macOS, you must use right-click and **Open** the first time. Apple did not check this build.
 
 On Linux, the computer must have glibc 2.35 or newer (Ubuntu 22.04 or newer, for example).
+If the AppImage does not start, your system does not have FUSE. Then run it with `--appimage-extract-and-run`.
 
 These platforms are not available:
 

@@ -106,7 +106,8 @@ if [ ! -d "$QUAZIP_DIR/lib" ]; then
   clone_pinned quazip-src v1.4 566fa496649b8cb09018b497575bb3bf2977965f https://github.com/stachenov/quazip.git
   cmake -S quazip-src -B quazip-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DQUAZIP_QT_MAJOR_VERSION=6 -DQUAZIP_FETCH_LIBS=ON -DQUAZIP_ENABLE_TESTS=OFF \
-    -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="$QUAZIP_DIR"
+    -DCMAKE_PREFIX_PATH="$QT_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="$QUAZIP_DIR" \
+    -DCMAKE_INSTALL_RPATH="$QT_PREFIX/lib"  # macdeployqt resolves QuaZip's @rpath Qt links only through this
   cmake --build quazip-build -j"$JOBS"
   cmake --install quazip-build
 fi
@@ -122,12 +123,12 @@ if [ ! -d ngspice-42/lib ]; then
 fi
 
 # --- fritzing-app and fritzing-parts ---
-[ -d fritzing-app ] || retry sh -c 'rm -rf fritzing-app && git clone --quiet https://github.com/fritzing/fritzing-app.git fritzing-app'
+[ -d fritzing-app ] || retry sh -c 'rm -rf fritzing-app && git clone --quiet --filter=blob:none https://github.com/fritzing/fritzing-app.git fritzing-app'
 retry git -C fritzing-app fetch --quiet --tags origin
 git -C fritzing-app checkout --quiet --force "$REF"
 # upstream pairs develop app builds with develop parts, everything else with master
 PARTS_BRANCH=master; [ "$REF" = develop ] && PARTS_BRANCH=develop
-[ -d fritzing-parts ] || retry sh -c 'rm -rf fritzing-parts && git clone --quiet --depth 1 --branch "$1" https://github.com/fritzing/fritzing-parts.git fritzing-parts' _ "$PARTS_BRANCH"
+[ -d fritzing-parts ] || retry sh -c 'rm -rf fritzing-parts && git clone --quiet --single-branch --branch "$1" https://github.com/fritzing/fritzing-parts.git fritzing-parts' _ "$PARTS_BRANCH"
 VERSION="$REF"
 [[ "$REF" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="$(git -C fritzing-app describe --tags 2>/dev/null || echo "$REF")"
 
@@ -135,11 +136,21 @@ VERSION="$REF"
 QMAKE_EXTRA=()
 # phoenix.pro asks for a universal x86_64+arm64 app; deps here are built for the host arch only
 [ "$OS" = macos ] && QMAKE_EXTRA=(-after "QMAKE_APPLE_DEVICE_ARCHS=$(uname -m)")
+# Qt's own ccache support (mkspecs/features/unix/ccache.prf), when ccache is installed
+command -v ccache >/dev/null && QMAKE_EXTRA+=(CONFIG+=ccache)
+# pri/gitversion.pri bakes the current time (to the second) into every compile command as BUILD_DATE,
+# which makes every file a ccache miss. Like SOURCE_DATE_EPOCH, use the commit time instead:
+# a `date` shim on PATH while qmake runs.
+EPOCH="$(git -C fritzing-app log -1 --format=%ct)"
+mkdir -p "$ROOT/date-shim"
+if [ "$OS" = macos ]; then DATE_ARGS="-r $EPOCH"; else DATE_ARGS="-d @$EPOCH"; fi
+printf '#!/bin/sh\nexec /bin/date %s "$@"\n' "$DATE_ARGS" > "$ROOT/date-shim/date"
+chmod +x "$ROOT/date-shim/date"
 (
   unset CI  # pri/gitversion.pri treats CI=true as a Travis build and makes a broken version string
   cd fritzing-app
   lrelease phoenix.pro  # translations/*.qm are not committed
-  qmake -o Makefile phoenix.pro CONFIG+=release ${QMAKE_EXTRA[@]+"${QMAKE_EXTRA[@]}"}
+  PATH="$ROOT/date-shim:$PATH" qmake -o Makefile phoenix.pro CONFIG+=release ${QMAKE_EXTRA[@]+"${QMAKE_EXTRA[@]}"}
   make -j"$JOBS" release  # phoenix.pro is debug_and_release
 )
 
@@ -162,7 +173,9 @@ copy_resources() { # same set as upstream's release scripts
   for d in sketches translations help; do cp -R "$APP/$d" "$1/$d"; done
   rm -f "$1"/translations/*.ts
   find "$1/translations" -name '*.qm' -size -128c -delete
-  cp -R "$ROOT/fritzing-parts" "$1/fritzing-parts"; rm -rf "$1/fritzing-parts/.git"
+  # keep .git, as upstream does: building the parts database reads its commit (PartsChecker::getSha),
+  # and the in-app parts update fetches and merges into it
+  cp -R "$ROOT/fritzing-parts" "$1/fritzing-parts"
   license_files "$1"
 }
 
@@ -211,8 +224,28 @@ if [ "$OS" = linux ]; then
   cp "$APP/Fritzing.1" "$APP/org.fritzing.Fritzing.desktop" "$APP/org.fritzing.Fritzing.appdata.xml" "$D/"
   mkdir -p "$D/icons" && cp "$APP"/resources/system_icons/linux/* "$D/icons/"
   ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen; build_parts_db "$L/Fritzing" "$D" )
-  # tar keeps the executable bits that a zip would drop
-  tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME" && rm -rf "$D"
+
+  # Turn the folder into an AppImage: one file that runs on most distros. The upstream launcher
+  # already resolves its own folder, so it works as AppRun inside the mounted image.
+  cp "$APP/Fritzing.sh" "$D/AppRun"; chmod +x "$D/AppRun"
+  cp "$APP/resources/system_icons/linux/fritzing_icon.png" "$D/fritzing.png"  # desktop file: Icon=fritzing
+  fetch appimagetool ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 \
+    https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+  # pinned runtime; without --runtime-file appimagetool downloads the unpinned "continuous" one
+  fetch appimage-runtime 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d \
+    https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+  chmod +x appimagetool
+  ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream --runtime-file appimage-runtime \
+    "$D" "$OUT/$NAME.AppImage"
+  chmod +x "$OUT/$NAME.AppImage"
+
+  # smoke test the AppImage itself: it must start and index the parts
+  SMOKE="$(mktemp -d)"
+  ( export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen; cd "$SMOKE"
+    perl -e 'alarm shift; exec @ARGV' 600 "$OUT/$NAME.AppImage" -db "$SMOKE/parts.db" -pp "$D/fritzing-parts" -f "$D" ) \
+    || { echo "the AppImage failed to start" >&2; exit 1; }
+  [ "$(wc -c < "$SMOKE/parts.db")" -gt 1000000 ] || { echo "the AppImage did not build a parts database" >&2; exit 1; }
+  rm -rf "$SMOKE" "$D"
 
 else # macos
   BUNDLE="$ROOT/release64/Fritzing.app"  # DESTDIR from phoenix.pro
@@ -223,7 +256,6 @@ else # macos
   copy_resources "$S"
   cp -L "$ROOT/ngspice-42/lib/libngspice.0.dylib" "$S/"
 
-  # Qt's lib folder lets macdeployqt resolve QuaZip's @rpath link to QtCore5Compat
   macdeployqt "$D/Fritzing.app" -libpath="$QT_PREFIX/lib" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
   # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
   find "$D/Fritzing.app/Contents/PlugIns/sqldrivers" -type f ! -name 'libqsqlite.dylib' -delete

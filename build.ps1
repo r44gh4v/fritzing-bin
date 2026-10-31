@@ -152,7 +152,7 @@ if (-not (Test-Path "ngspice-42\include")) {
 # --- fritzing-app and fritzing-parts ---
 if (-not (Test-Path "fritzing-app")) {
     Retry { if (Test-Path fritzing-app) { Remove-Item fritzing-app -Recurse -Force }
-        git clone --quiet https://github.com/fritzing/fritzing-app.git fritzing-app }
+        git clone --quiet --filter=blob:none https://github.com/fritzing/fritzing-app.git fritzing-app }
 }
 Retry { git -C fritzing-app fetch --quiet --tags origin }
 Run { git -C fritzing-app checkout --quiet --force $Ref }
@@ -160,7 +160,7 @@ Run { git -C fritzing-app checkout --quiet --force $Ref }
 $partsBranch = if ($Ref -eq "develop") { "develop" } else { "master" }
 if (-not (Test-Path "fritzing-parts")) {
     Retry { if (Test-Path fritzing-parts) { Remove-Item fritzing-parts -Recurse -Force }
-        git clone --quiet --depth 1 --branch $partsBranch https://github.com/fritzing/fritzing-parts.git fritzing-parts }
+        git clone --quiet --single-branch --branch $partsBranch https://github.com/fritzing/fritzing-parts.git fritzing-parts }
 }
 $version = $Ref
 if ($Ref -notmatch '^\d+\.\d+\.\d+$') {
@@ -178,7 +178,10 @@ Run { lrelease phoenix.pro }  # translations/*.qm are not committed
 # static libgit2 needs these Windows libraries, which pri/libgit2detect.pri does not add
 Run { qmake -o Makefile phoenix.pro "CONFIG+=release" "QMAKE_TARGET.arch=x86_64" "INCLUDEPATH+=$z/include" `
         "LIBS+=-L$z/lib -lzlib -lwinhttp -lrpcrt4 -lcrypt32 -lole32 -lsecur32 -ladvapi32 -lws2_32" }
+# nmake runs one job at a time; /MP lets cl compile the files of each batch on all cores
+$env:CL = "/MP"
 Run { nmake release }
+Remove-Item Env:CL
 Pop-Location
 
 $exe = Get-Item "$root\release64\Fritzing.exe" -ErrorAction SilentlyContinue  # DESTDIR from phoenix.pro
@@ -212,8 +215,10 @@ $app = "$root\fritzing-app"
 foreach ($d in "sketches", "translations", "help") { Copy-Item "$app\$d" "$out\$d" -Recurse }
 Remove-Item "$out\translations\*.ts"
 Get-ChildItem "$out\translations\*.qm" | Where-Object { $_.Length -lt 128 } | Remove-Item  # empty translations
-Copy-Item "$root\fritzing-parts" "$out\fritzing-parts" -Recurse
-Remove-Item "$out\fritzing-parts\.git" -Recurse -Force -ErrorAction SilentlyContinue
+# keep .git, as upstream does: building the parts database reads its commit (PartsChecker::getSha),
+# and the in-app parts update fetches and merges into it. -Force: Git for Windows marks .git hidden.
+Copy-Item "$root\fritzing-parts" "$out\fritzing-parts" -Recurse -Force
+if (-not (Test-Path "$out\fritzing-parts\.git\HEAD")) { throw "fritzing-parts\.git was not copied" }
 foreach ($f in "README.md", "INSTALL.txt", "LICENSE.GPL2", "LICENSE.GPL3", "LICENSE.LGPLv3", "LICENSE.CC-BY-SA",
     "LICENSE.Modified_BSD", "LICENSE_1_0.txt.BOOST", "license-openssl-ssleay.txt") {
     if (Test-Path "$app\$f") { Copy-Item "$app\$f" $out }
