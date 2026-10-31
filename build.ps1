@@ -197,7 +197,11 @@ if (Test-Path "$root\github") { Remove-Item "$root\github" -Recurse -Force }
 New-Item -ItemType Directory $out | Out-Null
 Copy-Item $exe.FullName $out
 Copy-Item "$quazipDir\bin\*.dll" $out
-Run { windeployqt --release --compiler-runtime --no-translations "$out\Fritzing.exe" }
+Run { windeployqt --release --no-compiler-runtime --no-translations "$out\Fritzing.exe" }
+# the Visual C++ runtime next to the exe, so Fritzing also starts on PCs that do not have it installed
+$crt = Get-ChildItem "$env:VCToolsRedistDir\x64" -Directory -Filter "Microsoft.VC*.CRT" | Select-Object -First 1
+if (-not $crt) { throw "Visual C++ runtime not found in $env:VCToolsRedistDir" }
+Copy-Item "$($crt.FullName)\*.dll" $out
 # windeployqt does not follow non-Qt DLLs: deploy QuaZip's Qt dependencies too
 foreach ($dll in Get-ChildItem "$out\quazip*.dll") {
     Run { windeployqt --release --no-translations --dir $out $dll.FullName }
@@ -209,7 +213,8 @@ Get-ChildItem "$out\sqldrivers\*.dll" -Exclude qsqlite.dll | Remove-Item
 # fail if the exe or a bundled DLL imports a DLL that is neither bundled nor part of Windows
 $missing = foreach ($bin in Get-ChildItem $out -Include *.exe, *.dll -Recurse) {
     dumpbin /nologo /dependents $bin.FullName | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w.+-]+\.dll$' } |
-    Where-Object { -not (Test-Path "$out\$_") -and -not (Test-Path "$env:SystemRoot\System32\$_") -and $_ -notmatch '^(api|ext)-ms-' } |
+    Where-Object { -not (Test-Path "$out\$_") -and $_ -notmatch '^(api|ext)-ms-' -and
+        ($_ -match '^(msvcp|vcruntime|concrt|vccorlib)' -or -not (Test-Path "$env:SystemRoot\System32\$_")) } |
     ForEach-Object { "$($bin.Name) -> $_" }
 }
 if ($missing) { throw "missing DLLs in package:`n$($missing -join "`n")" }
