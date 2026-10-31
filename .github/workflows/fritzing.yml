@@ -143,7 +143,6 @@ jobs:
           max-size: 1G
           evict-old-files: job
           job-summary: ''
-          install: ${{ !matrix.container }}
 
       # not Git Bash: its /usr/bin/link would shadow the MSVC linker
       - name: Build Fritzing (Windows)
