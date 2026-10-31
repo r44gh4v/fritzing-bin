@@ -122,6 +122,12 @@ jobs:
           install-deps: ${{ matrix.container && 'nosudo' || 'true' }}
           setup-python: ${{ !matrix.container }}
 
+      # only the dependency part of the script: other edits keep the cache
+      - name: Dependency recipe
+        id: recipe
+        shell: bash
+        run: echo "hash=$(sed -n '/^# --- dependencies ---/,/^# --- build ---/p' '${{ matrix.script }}' | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
       - name: Cache dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
@@ -133,7 +139,7 @@ jobs:
             Clipper1-*
             quazip-*
             ngspice-*
-          key: deps-${{ matrix.id }}-${{ needs.plan.outputs.deps }}-${{ hashFiles(matrix.script) }}
+          key: deps-${{ matrix.id }}-${{ needs.plan.outputs.deps }}-${{ steps.recipe.outputs.hash }}
 
       - name: Compiler cache (MacOS, Linux)
         if: matrix.group != 'windows'

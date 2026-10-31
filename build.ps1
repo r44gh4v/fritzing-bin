@@ -175,13 +175,18 @@ if (-not (Test-Path "fritzing-parts")) {
         git clone --quiet --single-branch --branch develop https://github.com/fritzing/fritzing-parts.git fritzing-parts }
 }
 
+# --- build ---
 # pri/gitversion.pri treats CI=true as Travis and makes a broken version string
 Remove-Item Env:CI -ErrorAction SilentlyContinue
 $z = "$root\zlib" -replace '\\', '/'
+# Qt headers compiled once, not again in each source file
+Set-Content "$work\pch.h" "#include <QtWidgets>`n#include <QtXml>"
+$pch = "$work\pch.h" -replace '\\', '/'
 Push-Location fritzing-app
 Run { lrelease phoenix.pro }  # the .qm translation files are not committed
 # static libgit2 needs these system libraries; pri/libgit2detect.pri does not add them
-Run { qmake -o Makefile phoenix.pro "CONFIG+=release" "QMAKE_TARGET.arch=x86_64" "INCLUDEPATH+=$z/include" `
+Run { qmake -o Makefile phoenix.pro "CONFIG+=release precompile_header" "PRECOMPILED_HEADER=$pch" `
+        "QMAKE_TARGET.arch=x86_64" "INCLUDEPATH+=$z/include" `
         "LIBS+=-L$z/lib -lzlib -lwinhttp -lrpcrt4 -lcrypt32 -lole32 -lsecur32 -ladvapi32 -lws2_32" }
 # nmake runs one job at a time; /MP makes cl use all cores
 $env:CL = "/MP"
