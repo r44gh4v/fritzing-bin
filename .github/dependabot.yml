@@ -1,7 +1,10 @@
-# Keeps the pinned action commit IDs in .github/workflows up to date
+# Keeps the pinned action commit IDs up to date; dependabot-merge.yml merges the pull request.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

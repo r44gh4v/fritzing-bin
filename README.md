@@ -20,11 +20,8 @@ You need a free [GitHub account](https://github.com/signup). You do not need to 
 6. Tick the box for your computer. You can tick more than one box. You get one file for each box. If you tick no box, the run stops with a message.
 
    - **Windows (x64)**: all normal Windows 10 and 11 computers
-   - **MacOS (Apple Silicon)**: Macs from 2020 on with an M1, M2, M3 or M4 chip
-   - **MacOS (Intel)**: older Macs with an Intel chip
-   - **Linux (x64)**: Ubuntu 22.04 or newer, or a distribution of the same age
-
-   Not sure which Mac you have? Click the Apple menu, then **About This Mac**. Look at **Chip** or **Processor**.
+   - **MacOS (Intel and Apple Silicon)**: all Macs that Qt supports (macOS 13 or newer)
+   - **Linux (x64)**: Ubuntu 22.04 or newer, Debian 12, Fedora, Arch and most other distributions
 
 7. Leave **Fritzing version** empty. You get the latest stable version.
 8. Click the green **Run workflow** button.
@@ -43,7 +40,7 @@ GitHub deletes the file after 2 days. To get it again, do Part 1 from step 4.
 2. Open the new folder. Double-click **Fritzing** (Fritzing.exe).
 3. First start only: Windows shows "Windows protected your PC", because this build is not signed. Click **More info**, then **Run anyway**.
 
-### macOS
+### MacOS
 
 1. Double-click the downloaded `.zip` file. You get **Fritzing**. Drag it into your **Applications** folder.
 2. Double-click **Fritzing**. macOS shows a warning, because Apple did not check this build. Click **Done** (or **Cancel**).
@@ -63,17 +60,17 @@ xattr -cr /Applications/Fritzing.app
 If nothing happens: right-click in the folder, select **Open in Terminal**, type `./` and the file name, add ` --appimage-extract-and-run`, and press Enter. For example:
 
 ```
-./fritzing-1.0.7-linux-x64.AppImage --appimage-extract-and-run
+./fritzing-1.0.8-linux-x64.AppImage --appimage-extract-and-run
 ```
 
-The Linux build needs Ubuntu 22.04 or newer, or a different distribution of the same age.
+The Linux build is an AppImage: one file that contains Fritzing and the libraries it needs. It runs on most distributions with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, Arch and newer). You do not need to install it.
 
 ## Other versions
 
 | In **Fritzing version**, type | You get |
 |---|---|
-| (nothing) | The latest stable version, for example `1.0.7` |
-| `1.0.7` | That stable version |
+| (nothing) | The latest stable version, for example `1.0.8` |
+| `1.0.7` | An older version |
 | `develop` | The latest development code. It can be unstable. |
 
 These computers are not supported:
@@ -81,6 +78,8 @@ These computers are not supported:
 - **32-bit Windows.** Fritzing needs Qt 6, which does not support it.
 - **Windows on ARM.** The simulator library does not exist for it. The Windows (x64) build runs on these computers through emulation.
 - **Linux on ARM.**
+
+The build reads the Qt version and the versions of all libraries from the Fritzing source code. It also takes the newest parts library. New Fritzing versions do not need changes to this project.
 
 ## Licenses
 
@@ -102,7 +101,7 @@ The workflow runs `build.ps1` (Windows) or `build.sh` (macOS, Linux). You can ru
 
 ```
 pwsh build.ps1 [-Ref 1.0.7]          # Windows
-bash build.sh linux|macos [1.0.7]     # macOS, Linux
+bash build.sh linux|macos [1.0.7]     # MacOS, Linux
 ```
 
 The result goes into the `github` folder.

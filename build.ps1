@@ -1,13 +1,14 @@
 # Builds Fritzing (https://github.com/fritzing/fritzing-app) for 64-bit Windows.
-# Counterpart of build.sh (Linux/macOS); keep versions and checksums in sync.
+# Counterpart of build.sh (Linux/macOS). Versions come from fritzing_versions.py.
 #
-# usage: pwsh build.ps1 [-Ref <ref>] [-Platform <id>]
-#   Ref: empty or "stable" = newest X.Y.Z release, "develop", or any fritzing-app branch/tag
+# usage: pwsh build.ps1 [-Ref <ref>] [-Platform <id>] [-Version <label>]
+#   Ref: empty or "stable" = newest release, "develop", or any fritzing-app branch, tag or commit
 # Expects Visual Studio with C++ tools, Qt 6 (qmake.exe on PATH), cmake, ninja, git, 7z, curl, python.
 # Dependencies go next to fritzing-app, where its *.pri files look for them. Existing folders are reused.
 param(
     [string]$Ref = "",
-    [string]$Platform = "windows-x64"
+    [string]$Platform = "windows-x64",
+    [string]$Version = ""
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -23,38 +24,41 @@ function Retry([scriptblock]$cmd) {
     }
 }
 
-function Fetch([string]$out, [string]$sum, [string[]]$urls) {
-    if ((Test-Path $out) -and (Get-FileHash $out -Algorithm SHA256).Hash -eq $sum) { return }
+function Fetch([string]$name, [string]$sum, [string[]]$urls) {
+    $out = "$work\$name"
+    if ((Test-Path $out) -and (-not $sum -or (Get-FileHash $out -Algorithm SHA256).Hash -eq $sum)) { return }
+    if (-not $sum) { Write-Warning "no known checksum for $name; not verified" }
     foreach ($url in $urls) {
         try { Retry { curl.exe -fsSL --connect-timeout 30 -o "$out.part" $url } } catch { continue }
-        if ((Get-FileHash "$out.part" -Algorithm SHA256).Hash -eq $sum) { Move-Item -Force "$out.part" $out; return }
+        if (-not $sum -or (Get-FileHash "$out.part" -Algorithm SHA256).Hash -eq $sum) { Move-Item -Force "$out.part" $out; return }
         Write-Warning "checksum mismatch for $url"
     }
     Remove-Item "$out.part" -ErrorAction SilentlyContinue
-    throw "could not download $out"
+    throw "could not download $name"
 }
 
 function ClonePinned([string]$dir, [string]$tag, [string]$commit, [string]$url) {
     # fails if the tag was moved
     if (Test-Path $dir) { return }
     Retry { if (Test-Path "$dir.tmp") { Remove-Item "$dir.tmp" -Recurse -Force }; git clone --quiet --depth 1 --branch $tag $url "$dir.tmp" }
-    if ((git -C "$dir.tmp" rev-parse HEAD) -ne $commit) { throw "$url $tag is not commit $commit" }
+    if (-not $commit) { Write-Warning "no known commit for $url $tag; not verified" }
+    elseif ((git -C "$dir.tmp" rev-parse HEAD) -ne $commit) { throw "$url $tag is not commit $commit" }
     Move-Item "$dir.tmp" $dir
+}
+
+function Versions([string[]]$arguments) {
+    $lines = python -I "$root\fritzing_versions.py" @arguments
+    if ($LASTEXITCODE -ne 0) { throw "fritzing_versions.py $arguments failed" }
+    $values = @{}
+    foreach ($line in $lines) { if ($line -match '^(\w+)=(.*)$') { $values[$Matches[1]] = $Matches[2].Trim("'") } }
+    $values
 }
 
 $SF = "https://downloads.sourceforge.net/project"
 $SFMaster = "https://master.dl.sourceforge.net/project"
-
 $root = (Get-Location).Path
-if (-not $Ref) { $Ref = "stable" }
-# "stable" = newest X.Y.Z branch or tag (upstream keeps each release on a branch with its name)
-if ($Ref -eq "stable") {
-    $refs = $null
-    Retry { $script:refs = git ls-remote --heads --tags https://github.com/fritzing/fritzing-app.git }
-    $Ref = $refs | ForEach-Object { if ($_ -match 'refs/(heads|tags)/(\d+\.\d+\.\d+)$') { $Matches[2] } } |
-    Sort-Object { [version]$_ } | Select-Object -Last 1
-    if (-not $Ref) { throw "could not find the latest stable version" }
-}
+$work = "$root\_work"
+New-Item -ItemType Directory -Force $work | Out-Null
 
 # Visual Studio x64 environment, unless this is already a developer prompt
 if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
@@ -72,94 +76,102 @@ foreach ($tool in "cl", "link", "nmake", "qmake", "lrelease", "windeployqt", "cm
 # Git for Windows has a Unix `link` tool; the MSVC linker must come first
 if ((Get-Command link).Source -notmatch 'MSVC') { throw "'link' is not the MSVC linker: $((Get-Command link).Source)" }
 
+# --- Fritzing source, then the versions it needs ---
+if (-not (Test-Path "fritzing-app")) {
+    Retry { if (Test-Path fritzing-app) { Remove-Item fritzing-app -Recurse -Force }
+        git clone --quiet --filter=blob:none https://github.com/fritzing/fritzing-app.git fritzing-app }
+}
+Retry { git -C fritzing-app fetch --quiet --tags origin }
+$resolved = Versions @("resolve", "fritzing-app", $Ref)
+$Ref = $resolved.REF
+if (-not $Version) { $Version = $resolved.VERSION }
+Run { git -C fritzing-app checkout --quiet --force $Ref }
+$v = Versions @("deps", "fritzing-app")
+
 $qtVersion = (qmake -query QT_VERSION).Trim()
 $qtPrefix = (qmake -query QT_INSTALL_PREFIX).Trim()
-Write-Host "Qt $qtVersion ($qtPrefix), building fritzing-app @ $Ref for $Platform"
+if ([version]$qtVersion -lt [version]$v.QT_LEAST -or [version]$qtVersion -gt [version]$v.QT_MOST) {
+    throw "Fritzing $Version needs Qt $($v.QT_LEAST) to $($v.QT_MOST), found $qtVersion"
+}
+Write-Host "Fritzing $Version ($Ref) with Qt $qtVersion for $Platform"
 
-# Boost headers; the version must be listed in pri/boostdetect.pri
-if (-not (Test-Path "boost_1_85_0")) {
-    Fetch "boost.7z" "16D16B9658753117C1434E5450C5EAC194957F4B6D0B390B9D07900D37C115A4" @(
-        "https://archives.boost.io/release/1.85.0/source/boost_1_85_0.7z",
-        "https://sourceforge.net/projects/boost/files/boost/1.85.0/boost_1_85_0.7z/download")
-    Run { 7z x -y -bso0 boost.7z }
+# --- dependencies ---
+$boostDir = "boost_1_$($v.BOOST)_0"
+if (-not (Test-Path $boostDir)) {
+    Fetch "boost.7z" $v.BOOST_SHA_7Z @(
+        "https://archives.boost.io/release/1.$($v.BOOST).0/source/$boostDir.7z",
+        "https://sourceforge.net/projects/boost/files/boost/1.$($v.BOOST).0/$boostDir.7z/download")
+    Run { 7z x -y -bso0 "$work\boost.7z" }
 }
 
-ClonePinned svgpp-1.3.1 v1.3.1 fda1fd889548289178261d7aa02dd5d647247f94 https://github.com/svgpp/svgpp.git
+ClonePinned "svgpp-$($v.SVGPP)" "v$($v.SVGPP)" $v.SVGPP_COMMIT https://github.com/svgpp/svgpp.git
 
 # zlib, static: Windows has none, and libgit2, QuaZip and Fritzing need it
 if (-not (Test-Path "zlib\lib\zlib.lib")) {
-    ClonePinned zlib-src v1.3.1 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf https://github.com/madler/zlib.git
-    Run { cmake -G Ninja -S zlib-src -B zlib-build -DCMAKE_BUILD_TYPE=Release `
+    ClonePinned "$work\zlib-src" v1.3.1 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf https://github.com/madler/zlib.git
+    Run { cmake -G Ninja -S "$work\zlib-src" -B "$work\zlib-build" -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_POLICY_VERSION_MINIMUM="3.5" "-DCMAKE_INSTALL_PREFIX=$root\zlib" }
-    Run { cmake --build zlib-build }
-    Run { cmake --install zlib-build }
+    Run { cmake --build "$work\zlib-build" }
+    Run { cmake --install "$work\zlib-build" }
     # only the static library, under the name the others look for
     Copy-Item -Force zlib\lib\zlibstatic.lib zlib\lib\zlib.lib
     Remove-Item zlib\bin -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # libgit2, static, as pri/libgit2detect.pri expects on Windows
-if (-not (Test-Path "libgit2-1.7.1\lib\git2.lib")) {
-    ClonePinned libgit2-src v1.7.1 a2bde63741977ca0f4ef7db2f609df320be67a08 https://github.com/libgit2/libgit2.git
-    Run { cmake -G Ninja -S libgit2-src -B libgit2-build -DCMAKE_BUILD_TYPE=Release `
+$libgit2Dir = "$root\libgit2-$($v.LIBGIT2)"
+if (-not (Test-Path "$libgit2Dir\lib\git2.lib")) {
+    ClonePinned "$work\libgit2-src" "v$($v.LIBGIT2)" $v.LIBGIT2_COMMIT https://github.com/libgit2/libgit2.git
+    Run { cmake -G Ninja -S "$work\libgit2-src" -B "$work\libgit2-build" -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTS=OFF -DBUILD_CLI=OFF `
             -DUSE_HTTPS=WinHTTP -DUSE_SSH=OFF -DUSE_GSSAPI=OFF -DREGEX_BACKEND=builtin -DSTATIC_CRT=OFF `
-            -DUSE_BUNDLED_ZLIB=OFF "-DCMAKE_PREFIX_PATH=$root\zlib" "-DCMAKE_INSTALL_PREFIX=$root\libgit2-1.7.1" }
-    Run { cmake --build libgit2-build }
-    Run { cmake --install libgit2-build }
+            -DUSE_BUNDLED_ZLIB=OFF "-DCMAKE_PREFIX_PATH=$root\zlib" "-DCMAKE_INSTALL_PREFIX=$libgit2Dir" }
+    Run { cmake --build "$work\libgit2-build" }
+    Run { cmake --install "$work\libgit2-build" }
 }
 
-if (-not (Test-Path "Clipper1-6.4.2\lib")) {
-    Fetch "clipper.zip" "A14320D82194807C4480CE59C98AA71CD4175A5156645C4E2B3EDD330B930627" @(
-        "$SF/polyclipping/clipper_ver6.4.2.zip", "$SFMaster/polyclipping/clipper_ver6.4.2.zip")
-    if (Test-Path clipper-src) { Remove-Item clipper-src -Recurse -Force }
-    Run { 7z x -y -bso0 -oclipper-src clipper.zip }
-    Run { cmake -G Ninja -S clipper-src\cpp -B clipper-build -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DBUILD_SHARED_LIBS=OFF "-DCMAKE_INSTALL_PREFIX=$root\Clipper1-6.4.2" }
-    Run { cmake --build clipper-build }
-    Run { cmake --install clipper-build }
+$clipperDir = "$root\Clipper1-$($v.CLIPPER)"
+if (-not (Test-Path "$clipperDir\lib")) {
+    Fetch "clipper.zip" $v.CLIPPER_SHA @(
+        "$SF/polyclipping/clipper_ver$($v.CLIPPER).zip", "$SFMaster/polyclipping/clipper_ver$($v.CLIPPER).zip")
+    if (Test-Path "$work\clipper-src") { Remove-Item "$work\clipper-src" -Recurse -Force }
+    Run { 7z x -y -bso0 "-o$work\clipper-src" "$work\clipper.zip" }
+    Run { cmake -G Ninja -S "$work\clipper-src\cpp" -B "$work\clipper-build" -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DBUILD_SHARED_LIBS=OFF "-DCMAKE_INSTALL_PREFIX=$clipperDir" }
+    Run { cmake --build "$work\clipper-build" }
+    Run { cmake --install "$work\clipper-build" }
 }
 
-# QuaZip, built with the same Qt; the folder name is what pri/quazipdetect.pri expects
-$quazipDir = "$root\quazip-$qtVersion-1.4intuisphere"
+$quazipDir = "$root\" + $v.QUAZIP_DIR.Replace("@QT@", $qtVersion)
 if (-not (Test-Path "$quazipDir\lib")) {
-    ClonePinned quazip-src v1.4 566fa496649b8cb09018b497575bb3bf2977965f https://github.com/stachenov/quazip.git
-    Run { cmake -G Ninja -S quazip-src -B quazip-build -DCMAKE_BUILD_TYPE=Release `
+    ClonePinned "$work\quazip-src" "v$($v.QUAZIP)" $v.QUAZIP_COMMIT https://github.com/stachenov/quazip.git
+    Run { cmake -G Ninja -S "$work\quazip-src" -B "$work\quazip-build" -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_POLICY_VERSION_MINIMUM="3.5" -DQUAZIP_QT_MAJOR_VERSION=6 -DQUAZIP_FETCH_LIBS=ON `
             -DQUAZIP_ENABLE_TESTS=OFF "-DCMAKE_PREFIX_PATH=$qtPrefix;$root\zlib" "-DCMAKE_INSTALL_PREFIX=$quazipDir" }
-    Run { cmake --build quazip-build }
-    Run { cmake --install quazip-build }
+    Run { cmake --build "$work\quazip-build" }
+    Run { cmake --install "$work\quazip-build" }
 }
 
 # ngspice: prebuilt DLL for the simulator
-if (-not (Test-Path "ngspice-42\include")) {
-    Fetch "ngspice.7z" "EFDC6315A6ADC4DE957E408AAC4DB0B1BF63EAF74DA5FCF48D1C911DF92AB174" @(
-        "$SF/ngspice/ng-spice-rework/old-releases/42/ngspice-42_dll_64.7z",
-        "$SFMaster/ngspice/ng-spice-rework/old-releases/42/ngspice-42_dll_64.7z")
-    if (Test-Path ngspice-tmp) { Remove-Item ngspice-tmp -Recurse -Force }
-    Run { 7z x -y -bso0 -ongspice-tmp ngspice.7z }
-    New-Item -ItemType Directory ngspice-42 | Out-Null
-    Copy-Item ngspice-tmp\Spice64_dll\include ngspice-42\include -Recurse
-    Copy-Item ngspice-tmp\Spice64_dll\dll-vs ngspice-42\bin -Recurse  # ngspice.dll and its OpenMP runtime
+$ngspiceDir = "$root\ngspice-$($v.NGSPICE)"
+if (-not (Test-Path "$ngspiceDir\include")) {
+    $n = $v.NGSPICE
+    Fetch "ngspice.7z" $v.NGSPICE_SHA_DLL @(
+        "$SF/ngspice/ng-spice-rework/$n/ngspice-${n}_dll_64.7z",
+        "$SF/ngspice/ng-spice-rework/old-releases/$n/ngspice-${n}_dll_64.7z",
+        "$SFMaster/ngspice/ng-spice-rework/old-releases/$n/ngspice-${n}_dll_64.7z")
+    if (Test-Path "$work\ngspice-tmp") { Remove-Item "$work\ngspice-tmp" -Recurse -Force }
+    Run { 7z x -y -bso0 "-o$work\ngspice-tmp" "$work\ngspice.7z" }
+    New-Item -ItemType Directory $ngspiceDir | Out-Null
+    Copy-Item "$work\ngspice-tmp\Spice64_dll\include" "$ngspiceDir\include" -Recurse
+    Copy-Item "$work\ngspice-tmp\Spice64_dll\dll-vs" "$ngspiceDir\bin" -Recurse  # ngspice.dll and its OpenMP runtime
 }
 
-if (-not (Test-Path "fritzing-app")) {
-    Retry { if (Test-Path fritzing-app) { Remove-Item fritzing-app -Recurse -Force }
-        git clone --quiet --filter=blob:none https://github.com/fritzing/fritzing-app.git fritzing-app }
-}
-Retry { git -C fritzing-app fetch --quiet --tags origin }
-Run { git -C fritzing-app checkout --quiet --force $Ref }
-# as upstream: develop parts for develop builds, master parts otherwise
-$partsBranch = if ($Ref -eq "develop") { "develop" } else { "master" }
+# Parts: the current library (develop), as upstream releases and distribution packages ship it.
+# Full clone with .git: the parts database and the in-app parts check use it.
 if (-not (Test-Path "fritzing-parts")) {
     Retry { if (Test-Path fritzing-parts) { Remove-Item fritzing-parts -Recurse -Force }
-        git clone --quiet --single-branch --branch $partsBranch https://github.com/fritzing/fritzing-parts.git fritzing-parts }
-}
-$version = $Ref
-if ($Ref -notmatch '^\d+\.\d+\.\d+$') {
-    $version = (git -C fritzing-app describe --tags 2>$null)
-    if (-not $version) { $version = $Ref }
-    $version = $version.Trim()
+        git clone --quiet --single-branch --branch develop https://github.com/fritzing/fritzing-parts.git fritzing-parts }
 }
 
 # pri/gitversion.pri treats CI=true as Travis and makes a broken version string
@@ -179,7 +191,7 @@ Pop-Location
 $exe = Get-Item "$root\release64\Fritzing.exe" -ErrorAction SilentlyContinue  # DESTDIR from phoenix.pro
 if (-not $exe) { throw "Fritzing.exe not found after build" }
 
-$out = "$root\github\fritzing-$version-$Platform"
+$out = "$root\github\fritzing-$Version-$Platform"
 if (Test-Path "$root\github") { Remove-Item "$root\github" -Recurse -Force }
 New-Item -ItemType Directory $out | Out-Null
 Copy-Item $exe.FullName $out
@@ -189,7 +201,7 @@ Run { windeployqt --release --compiler-runtime --no-translations "$out\Fritzing.
 foreach ($dll in Get-ChildItem "$out\quazip*.dll") {
     Run { windeployqt --release --no-translations --dir $out $dll.FullName }
 }
-Copy-Item "$root\ngspice-42\bin\*.dll" $out
+Copy-Item "$ngspiceDir\bin\*.dll" $out
 # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
 Get-ChildItem "$out\sqldrivers\*.dll" -Exclude qsqlite.dll | Remove-Item
 
@@ -212,7 +224,7 @@ foreach ($f in "README.md", "INSTALL.txt", "LICENSE.GPL2", "LICENSE.GPL3", "LICE
     "LICENSE.Modified_BSD", "LICENSE_1_0.txt.BOOST", "license-openssl-ssleay.txt") {
     if (Test-Path "$app\$f") { Copy-Item "$app\$f" $out }
 }
-(Get-Content "$root\SOURCE.txt" -Raw).Replace("@VERSION@", $version).Replace("@REF@", $Ref) |
+(Get-Content "$root\SOURCE.txt" -Raw).Replace("@VERSION@", $Version).Replace("@REF@", $Ref) |
 Set-Content "$out\SOURCE.txt"
 
 # Builds the parts database with the packaged app, as upstream's release script does. This is also
@@ -236,4 +248,4 @@ Remove-Item $partsFixed -Recurse -Force
 Run { 7z a -tzip -bso0 "$out.zip" $out }
 Remove-Item $out -Recurse -Force
 
-"FRITZING_VERSION=$version" | Out-File -Append -Encoding ascii $env:GITHUB_OUTPUT
+"FRITZING_VERSION=$Version" | Out-File -Append -Encoding ascii $env:GITHUB_OUTPUT
