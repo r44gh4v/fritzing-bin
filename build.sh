@@ -150,7 +150,8 @@ command -v ccache >/dev/null && QMAKE_EXTRA+=(CONFIG+=ccache)
 [ "$OS" = macos ] && QMAKE_EXTRA+=("QMAKE_CXXFLAGS+=-Wno-error=implicit-function-declaration")
 # Qt headers compiled once, not again in each source file. ccache settings for a precompiled
 # header from the ccache manual ("Precompiled headers").
-printf '#include <QtWidgets>\n#include <QtXml>\n' > "$WORK/pch.h"
+# qmake also makes a C version of it: C++ only, as in Qt's documentation
+printf '#ifdef __cplusplus\n#include <QtWidgets>\n#include <QtXml>\n#endif\n' > "$WORK/pch.h"
 QMAKE_EXTRA+=(CONFIG+=precompile_header "PRECOMPILED_HEADER=$WORK/pch.h")
 export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
 [ "$OS" = macos ] && QMAKE_EXTRA+=("QMAKE_CXXFLAGS+=-Xclang -fno-pch-timestamp")
