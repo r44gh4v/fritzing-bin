@@ -1,7 +1,6 @@
 # fritzing-bin
 
-Build [Fritzing](https://github.com/fritzing/fritzing-app) from its source code with GitHub Actions.
-You get a Fritzing build for Windows, macOS or Linux. You do not pay for it.
+Get [Fritzing](https://fritzing.org) for Windows, macOS or Linux without paying, built by GitHub from the [official source code](https://github.com/fritzing/fritzing-app).
 
 This project is not part of the Fritzing project. It does not change the Fritzing source code.
 
@@ -9,80 +8,106 @@ This project is not part of the Fritzing project. It does not change the Fritzin
 > The official builds cost money at [fritzing.org](https://fritzing.org). This money helps the Fritzing team.
 > If you use Fritzing frequently, buy the official build.
 
-## Make a build
+You need a free [GitHub account](https://github.com/signup). You do not need to install anything.
 
-1. Fork this repository.
-2. In your fork, open the **Actions** tab. Enable the workflows.
-3. Select the **fritzing** workflow. Then select **Run workflow**.
-4. Select the platform.
-5. Optional: type a Fritzing version. If you leave this field empty, you get the latest stable version.
-6. Select **Run workflow**.
-7. Wait for the build to finish. This takes approximately 30 to 60 minutes.
-8. Open the run. Download your build from the **Artifacts** section. GitHub deletes it after 2 days.
+## Part 1: Make your build
 
-To make a newer build, do steps 3 to 8 again.
+1. Sign in to GitHub.
+2. At the top of this page, click **Fork**. Then click **Create fork**. You now have your own copy of this project.
+3. In your copy, click the **Actions** tab. Click the green button **I understand my workflows, go ahead and enable them**.
+4. In the list on the left, click **fritzing**.
+5. On the right, click **Run workflow**. A small window opens.
+6. Under **Which build do you want?**, select your computer:
 
-## Platforms
+   | Your computer | Select |
+   |---|---|
+   | Windows | **Windows (64-bit)** |
+   | Mac with an Apple chip (M1, M2, M3, M4 ...) | **macOS (Apple Silicon)** |
+   | Mac with an Intel chip | **macOS (Intel)** |
+   | Linux | **Linux (x64)** |
 
-| Platform | File | Start Fritzing |
-|---|---|---|
-| Windows (64-bit) | `.zip` | Unzip. Run `Fritzing.exe`. |
-| macOS (Apple Silicon) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
-| macOS (Intel) | `.zip` | Unzip. Right-click `Fritzing.app` and select **Open**. |
-| Linux (x64) | `.AppImage` | Make it executable (`chmod +x`). Run it. |
+   Not sure which Mac you have? Click the Apple menu, then **About This Mac**. Look at **Chip** or **Processor**.
 
-You can also select **All macOS** or **Everything**.
+7. Leave **Fritzing version** empty. You get the latest stable version.
+8. Click the green **Run workflow** button.
+9. Wait. After a few seconds, a new line appears. When it shows a green check mark, the build is ready. This takes 10 to 60 minutes. Refresh the page to see the progress.
+10. Click the line with the green check mark.
 
-On macOS, you must use right-click and **Open** the first time. Apple did not check this build.
+## Part 2: Install and start Fritzing
 
-On Linux, the computer must have glibc 2.35 or newer (Ubuntu 22.04 or newer, for example).
-If the AppImage does not start, your system does not have FUSE. Then run it with `--appimage-extract-and-run`.
+On the page of your build, scroll down to **Artifacts**. Click the file name to download it.
 
-These platforms are not available:
+GitHub deletes the file after 2 days. To get it again, do Part 1 from step 4.
 
-- **32-bit Windows.** Fritzing needs Qt 6. Qt 6 does not support 32-bit Windows.
-- **Linux on ARM.** The build did not work in tests.
-- **Windows on ARM.** The ngspice simulator library is not available for this platform. Use the Windows (64-bit) build. It runs on ARM computers through emulation.
+### Windows
 
-## Versions
+1. Right-click the downloaded `.zip` file. Select **Extract All**, then **Extract**. Fritzing does not start from inside the zip file.
+2. Open the new folder. Double-click **Fritzing** (Fritzing.exe).
+3. First start only: Windows shows "Windows protected your PC", because this build is not signed. Click **More info**, then **Run anyway**.
 
-| You type | You get |
+### macOS
+
+1. Double-click the downloaded `.zip` file. You get **Fritzing**. Drag it into your **Applications** folder.
+2. Double-click **Fritzing**. macOS shows a warning, because Apple did not check this build. Click **Done** (or **Cancel**).
+3. First start only: open **System Settings**, then **Privacy & Security**. Scroll down and click **Open Anyway** next to "Fritzing". Enter your password. Click **Open Anyway** again.
+
+If macOS says the app "is damaged", open **Terminal**, paste this line, press Return, and start Fritzing again:
+
+```
+xattr -cr /Applications/Fritzing.app
+```
+
+### Linux
+
+1. Right-click the downloaded `.AppImage` file. Select **Properties**. Turn on **Executable as Program** (on some systems: **Permissions** tab, **Allow executing file as program**).
+2. Double-click the file.
+
+If nothing happens: right-click in the folder, select **Open in Terminal**, type `./` and the file name, add ` --appimage-extract-and-run`, and press Enter. For example:
+
+```
+./fritzing-1.0.7-linux-x64.AppImage --appimage-extract-and-run
+```
+
+The Linux build needs Ubuntu 22.04 or newer, or a different distribution of the same age.
+
+## Other versions
+
+| In **Fritzing version**, type | You get |
 |---|---|
 | (nothing) | The latest stable version, for example `1.0.7` |
 | `1.0.7` | That stable version |
 | `develop` | The latest development code. It can be unstable. |
-| other | A different branch or tag of fritzing-app |
 
-## Build on your computer
+These computers are not supported:
 
-You can also run the scripts on your computer. You must install Qt 6 (6.5.3 to 6.10), CMake, Git and a C++ compiler.
-
-- Windows (Visual Studio with C++ tools, Qt `bin` folder on PATH): `pwsh build.ps1`
-- Linux: `bash build.sh linux`
-- macOS: `bash build.sh macos`
-
-To select a version, add it at the end. For example: `bash build.sh linux 1.0.7`.
-The result goes into the `github` folder.
+- **32-bit Windows.** Fritzing needs Qt 6, which does not support it.
+- **Windows on ARM.** The simulator library does not exist for it. The Windows (64-bit) build runs on these computers through emulation.
+- **Linux on ARM.**
 
 ## Licenses
 
 This is not legal advice.
 
-- **Fritzing** source code uses [GPL v3](https://github.com/fritzing/fritzing-app/blob/develop/LICENSE.GPL3). You can build it and use it.
+- **Fritzing** uses the [GPL v3](https://github.com/fritzing/fritzing-app/blob/develop/LICENSE.GPL3). You can build it and use it.
 - **Fritzing parts and documentation** use [CC BY-SA 3.0](https://github.com/fritzing/fritzing-app/blob/develop/LICENSE.CC-BY-SA).
-- **The scripts in this repository** use the [MIT license](LICENSE).
+- **The files in this repository** use the [MIT license](LICENSE).
 
-Each build contains the license files and a `SOURCE.txt` file. `SOURCE.txt` shows where the source code is.
+Each build contains the license files and a `SOURCE.txt` file, which shows where the source code is.
 
-If you share a build with other persons, you must obey the GPL:
+If you give a build to other persons, obey the GPL: include the license files, tell them where the source code is, and publish any changes you make. If you change Fritzing, do not call your version "Fritzing".
 
-- Include the license files.
-- Tell them where the source code is.
-- If you change the source code, publish your changes.
+Your fork is public. Other GitHub users can download your build until GitHub deletes it.
 
-For these reasons, this repository does not publish builds. Each person makes their own build in their own fork.
+## For developers
 
-If you change Fritzing, do not use the name "Fritzing" for your version.
+The workflow runs `build.ps1` (Windows) or `build.sh` (macOS, Linux). You can run them on your own computer. You need Qt 6.5.3 to 6.10, CMake, Git, Python 3 and a C++ compiler (Visual Studio on Windows). `.github/workflows/fritzing.yml` shows all requirements.
+
+```
+pwsh build.ps1 [-Ref 1.0.7]          # Windows
+bash build.sh linux|macos [1.0.7]     # macOS, Linux
+```
+
+The result goes into the `github` folder.
 
 ## Thanks
 
