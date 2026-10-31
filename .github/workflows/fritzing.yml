@@ -17,13 +17,9 @@ on:
       version:
         description: "Fritzing version. Leave empty for the latest stable version."
         required: false
-  # every push to a work branch that changes the build tests all platforms
-  push:
-    branches-ignore: [main]
-    paths: [build.sh, build.ps1, fix_parts_xml.py, SOURCE.txt, .github/workflows/fritzing.yml]
 
 concurrency:
-  group: fritzing-${{ github.ref }}-${{ inputs.platform || 'push' }}
+  group: fritzing-${{ github.ref }}-${{ inputs.platform }}
   cancel-in-progress: true
 
 permissions:
@@ -42,7 +38,7 @@ jobs:
     steps:
       - id: plan
         env:
-          CHOICE: ${{ inputs.platform || 'Everything' }}
+          CHOICE: ${{ inputs.platform }}
         run: |
           all='[
             {"id":"windows-x64", "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",   "qt_host":"windows", "qt_arch":"win64_msvc2022_64"},
