@@ -146,6 +146,8 @@ fi
 # --- build ---
 QMAKE_EXTRA=()
 command -v ccache >/dev/null && QMAKE_EXTRA+=(CONFIG+=ccache)
+# Xcode 26 rejects Qt's qyieldcpu.h (__yield builtin used without a declaration); a warning is enough
+[ "$OS" = macos ] && QMAKE_EXTRA+=("QMAKE_CXXFLAGS+=-Wno-error=implicit-function-declaration")
 # pri/gitversion.pri puts the current time into every compile command (BUILD_DATE), so ccache
 # never hits. A `date` shim returns the commit time instead, like SOURCE_DATE_EPOCH.
 EPOCH="$(git -C fritzing-app log -1 --format=%ct)"
