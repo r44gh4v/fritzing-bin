@@ -196,10 +196,13 @@ foreach ($dll in Get-ChildItem "$out\quazip*.dll") {
     Run { windeployqt --release --no-translations --dir $out $dll.FullName }
 }
 Copy-Item "$root\ngspice-42\bin\*.dll" $out  # ngspice.dll is loaded at runtime from the exe folder
+# Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
+Get-ChildItem "$out\sqldrivers\*.dll" -Exclude qsqlite.dll | Remove-Item
 
 # Fail now, not on the user's PC, if any DLL that the exe or a bundled DLL imports is missing
 $missing = foreach ($bin in Get-ChildItem $out -Include *.exe, *.dll -Recurse) {
-    dumpbin /nologo /dependents $bin.FullName | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' } |
+    # dependency lines are bare file names; skip headers such as "Dump of file C:\...\x.dll"
+  dumpbin /nologo /dependents $bin.FullName | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[\w.+-]+\.dll$' } |
     Where-Object { -not (Test-Path "$out\$_") -and -not (Test-Path "$env:SystemRoot\System32\$_") -and $_ -notmatch '^(api|ext)-ms-' } |
     ForEach-Object { "$($bin.Name) -> $_" }
 }

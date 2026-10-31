@@ -187,6 +187,8 @@ if [ "$OS" = linux ]; then
   for p in platforms imageformats sqldrivers printsupport xcbglintegrations platforminputcontexts platformthemes iconengines tls; do
     if [ -d "$QT_PREFIX/plugins/$p" ]; then cp -r "$QT_PREFIX/plugins/$p" "$L/"; fi
   done
+  # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
+  find "$L/sqldrivers" -type f ! -name 'libqsqlite.so' -delete
   bundle_libs() {
     ldd "$1" 2>/dev/null | awk '/=> \//{print $3}' | while read -r lib; do
       case "$lib" in "$QT_PREFIX"/*|"$ROOT"/*) [ -e "$L/$(basename "$lib")" ] || cp -L "$lib" "$L/" ;; esac
@@ -221,7 +223,10 @@ else # macos
   copy_resources "$S"
   cp -L "$ROOT/ngspice-42/lib/libngspice.0.dylib" "$S/"
 
-  macdeployqt "$D/Fritzing.app" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
+  # Qt's lib folder lets macdeployqt resolve QuaZip's @rpath link to QtCore5Compat
+  macdeployqt "$D/Fritzing.app" -libpath="$QT_PREFIX/lib" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
+  # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
+  find "$D/Fritzing.app/Contents/PlugIns/sqldrivers" -type f ! -name 'libqsqlite.dylib' -delete
   build_parts_db "$S/Fritzing" "$S"  # as upstream: with the normal (cocoa) platform; runners have a GUI session
   # unsigned arm64 binaries do not launch at all; an ad-hoc signature fixes that
   codesign --force --deep --sign - "$D/Fritzing.app"
