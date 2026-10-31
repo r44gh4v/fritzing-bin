@@ -282,7 +282,8 @@ else # macos
 
   # every binary in the app must contain both Intel and Apple Silicon code
   THIN="$(find "$D/Fritzing.app" -type f \( -perm -u+x -o -name '*.dylib' \) -print0 | while IFS= read -r -d '' f; do
-    a="$(lipo -archs "$f" 2>/dev/null)" || continue
+    a="$(lipo -archs "$f" 2>/dev/null || true)"
+    [ -n "$a" ] || continue  # not a Mach-O file
     case " $a " in *" x86_64 "*" arm64 "*|*" arm64 "*" x86_64 "*) ;; *) echo "$f: $a" ;; esac
   done)"
   [ -z "$THIN" ] || { echo "binaries without both architectures:" >&2; echo "$THIN" >&2; exit 1; }
