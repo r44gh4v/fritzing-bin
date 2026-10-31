@@ -148,6 +148,12 @@ QMAKE_EXTRA=()
 command -v ccache >/dev/null && QMAKE_EXTRA+=(CONFIG+=ccache)
 # Xcode 26 rejects Qt's qyieldcpu.h (__yield builtin used without a declaration); a warning is enough
 [ "$OS" = macos ] && QMAKE_EXTRA+=("QMAKE_CXXFLAGS+=-Wno-error=implicit-function-declaration")
+# Qt headers compiled once, not again in each source file. ccache settings for a precompiled
+# header from the ccache manual ("Precompiled headers").
+printf '#include <QtWidgets>\n#include <QtXml>\n' > "$WORK/pch.h"
+QMAKE_EXTRA+=(CONFIG+=precompile_header "PRECOMPILED_HEADER=$WORK/pch.h")
+export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+[ "$OS" = macos ] && QMAKE_EXTRA+=("QMAKE_CXXFLAGS+=-Xclang -fno-pch-timestamp")
 # pri/gitversion.pri puts the current time into every compile command (BUILD_DATE), so ccache
 # never hits. A `date` shim returns the commit time instead, like SOURCE_DATE_EPOCH.
 EPOCH="$(git -C fritzing-app log -1 --format=%ct)"

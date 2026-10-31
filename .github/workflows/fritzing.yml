@@ -18,6 +18,10 @@ on:
       version:
         description: "Fritzing version. Leave empty for the latest stable version."
         required: false
+  # monthly test build of all systems in this repo only (not in forks), without downloads:
+  # shows when a runner image, Qt or Fritzing update breaks the build
+  schedule:
+    - cron: "17 5 3 * *"
 
 concurrency:
   group: fritzing-${{ github.ref }}-${{ inputs.windows }}-${{ inputs.macos }}-${{ inputs.linux }}
@@ -30,6 +34,7 @@ permissions:
 jobs:
   # Finds the Fritzing commit, the Qt version and the dependency versions, once for all builds
   plan:
+    if: github.event_name != 'schedule' || !github.event.repository.fork
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -43,7 +48,7 @@ jobs:
 
       - id: plan
         env:
-          SELECTED: ${{ toJSON(inputs) }}
+          SELECTED: ${{ github.event_name == 'schedule' && '{"windows":true,"macos":true,"linux":true}' || toJSON(inputs) }}
           WANTED: ${{ inputs.version }}
         run: |
           all='[
@@ -162,6 +167,7 @@ jobs:
         run: bash build.sh "${{ matrix.group }}" "${{ needs.plan.outputs.ref }}" "${{ matrix.id }}" "${{ needs.plan.outputs.version }}"
 
       - name: Upload
+        if: github.event_name != 'schedule'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           path: github/*
@@ -170,6 +176,7 @@ jobs:
           if-no-files-found: error
 
       - name: Summary
+        if: github.event_name != 'schedule'
         shell: bash
         run: |
           f="$(ls github)"
@@ -199,12 +206,12 @@ jobs:
           EOF
               ;;
               linux) cat <<'EOF'
-          **2. Allow it to run.** Right-click the downloaded file and select **Properties**. Turn on **Executable as Program** (on some systems: **Permissions** tab, **Allow executing file as program**).
-
-          **3. Start.** Double-click the file.
+          **2. Open a terminal in the download folder.** Open a terminal, type `cd ~/Downloads` and press Enter.
 
           EOF
-                printf 'If nothing happens: right-click in the folder, select **Open in Terminal**, type `./%s --appimage-extract-and-run` and press Enter.\n' "$f"
+                printf '**3. Allow it to run, first time only.** Type `chmod +x %s` and press Enter.\n\n' "$f"
+                printf '**4. Start.** Type `./%s` and press Enter. After step 3, a double-click on the file also starts it in most file managers.\n\n' "$f"
+                printf 'If you see an error about FUSE: type `./%s --appimage-extract-and-run` and press Enter.\n' "$f"
               ;;
             esac
             echo

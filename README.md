@@ -54,10 +54,19 @@ xattr -cr /Applications/Fritzing.app
 
 ### Linux
 
-1. Right-click the downloaded `.AppImage` file. Select **Properties**. Turn on **Executable as Program** (on some systems: **Permissions** tab, **Allow executing file as program**).
-2. Double-click the file.
+1. Open a terminal in the folder with the downloaded `.AppImage` file. For the Downloads folder, type `cd ~/Downloads` and press Enter.
+2. First time only: allow the file to run. Type `chmod +x` and the file name, and press Enter.
+3. Start Fritzing: type `./` and the file name, and press Enter. After step 2, a double-click on the file also starts it in most file managers.
 
-If nothing happens: right-click in the folder, select **Open in Terminal**, type `./` and the file name, add ` --appimage-extract-and-run`, and press Enter. For example:
+For example:
+
+```
+cd ~/Downloads
+chmod +x fritzing-1.0.8-linux-x64.AppImage
+./fritzing-1.0.8-linux-x64.AppImage
+```
+
+If you see an error about FUSE, start it with `--appimage-extract-and-run` after the file name:
 
 ```
 ./fritzing-1.0.8-linux-x64.AppImage --appimage-extract-and-run
