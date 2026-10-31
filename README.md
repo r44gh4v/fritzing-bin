@@ -17,14 +17,12 @@ You need a free [GitHub account](https://github.com/signup). You do not need to 
 3. In your copy, click the **Actions** tab. Click the green button **I understand my workflows, go ahead and enable them**.
 4. In the list on the left, click **fritzing**.
 5. On the right, click **Run workflow**. A small window opens.
-6. Under **Which build do you want?**, select your computer:
+6. Tick the box for your computer. You can tick more than one box. You get one file for each box. If you tick no box, the run stops with a message.
 
-   | Your computer | Select |
-   |---|---|
-   | Windows | **Windows (64-bit)** |
-   | Mac with an Apple chip (M1, M2, M3, M4 ...) | **macOS (Apple Silicon)** |
-   | Mac with an Intel chip | **macOS (Intel)** |
-   | Linux | **Linux (x64)** |
+   - **Windows**
+   - **Mac with an Apple chip (M1, M2, M3, M4 ...)**
+   - **Mac with an Intel chip**
+   - **Linux**
 
    Not sure which Mac you have? Click the Apple menu, then **About This Mac**. Look at **Chip** or **Processor**.
 
