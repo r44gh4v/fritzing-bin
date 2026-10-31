@@ -29,7 +29,8 @@ function Fetch([string]$name, [string]$sum, [string[]]$urls) {
     if ((Test-Path $out) -and (-not $sum -or (Get-FileHash $out -Algorithm SHA256).Hash -eq $sum)) { return }
     if (-not $sum) { Write-Warning "no known checksum for $name; not verified" }
     foreach ($url in $urls) {
-        try { Retry { curl.exe -fsSL --connect-timeout 30 -o "$out.part" $url } } catch { continue }
+        curl.exe -fsSL --retry 3 --retry-delay 10 --connect-timeout 30 -o "$out.part" $url
+        if ($LASTEXITCODE -ne 0) { continue }
         if (-not $sum -or (Get-FileHash "$out.part" -Algorithm SHA256).Hash -eq $sum) { Move-Item -Force "$out.part" $out; return }
         Write-Warning "checksum mismatch for $url"
     }

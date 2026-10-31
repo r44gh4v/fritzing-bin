@@ -38,7 +38,7 @@ fetch() { # <file> <sha256 or empty> <url> [mirror...]
   [ -f "$out" ] && { [ -z "$sum" ] || [ "$(sha256 "$out")" = "$sum" ]; } && return 0
   [ -n "$sum" ] || echo "WARNING: no known checksum for $(basename "$out"); not verified" >&2
   for url in "$@"; do
-    if retry curl -fsSL --connect-timeout 30 -o "$out.part" "$url"; then
+    if curl -fsSL --retry 3 --retry-delay 10 --connect-timeout 30 -o "$out.part" "$url"; then
       if [ -z "$sum" ] || [ "$(sha256 "$out.part")" = "$sum" ]; then mv "$out.part" "$out"; return 0; fi
       echo "checksum mismatch for $url" >&2
     fi
@@ -133,7 +133,7 @@ if [ ! -d "ngspice-$NGSPICE/lib" ]; then
   rm -rf "$WORK/ngspice-src" && mkdir "$WORK/ngspice-src"
   tar xzf "$WORK/ngspice.tar.gz" -C "$WORK/ngspice-src" --strip-components=1
   NG_FLAGS=(); [ "$OS" = macos ] && NG_FLAGS=(--disable-dependency-tracking \
-    "CFLAGS=-O2 -arch arm64 -arch x86_64" "CXXFLAGS=-O2 -arch arm64 -arch x86_64" "LDFLAGS=-arch arm64 -arch x86_64")
+    "CFLAGS=-O2 -arch arm64 -arch x86_64" "CXXFLAGS=-O2 -arch arm64 -arch x86_64 -Wno-invalid-specialization" "LDFLAGS=-arch arm64 -arch x86_64")
   ( cd "$WORK/ngspice-src" && ./configure --with-ngshared --without-x --with-readline=no --disable-debug \
       --disable-openmp --prefix="$ROOT/ngspice-$NGSPICE" ${NG_FLAGS[@]+"${NG_FLAGS[@]}"} \
       && make -j"$JOBS" && make install )
