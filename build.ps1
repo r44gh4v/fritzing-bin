@@ -70,7 +70,7 @@ if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
     }
 }
 
-foreach ($tool in "cl", "link", "nmake", "qmake", "lrelease", "windeployqt", "cmake", "ninja", "git", "7z", "curl", "dumpbin") {
+foreach ($tool in "cl", "link", "nmake", "qmake", "lrelease", "windeployqt", "cmake", "ninja", "git", "7z", "curl", "dumpbin", "python") {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "'$tool' not found in PATH" }
 }
 # Git for Windows ships a Unix `link` tool; make sure the MSVC linker wins
@@ -227,20 +227,27 @@ foreach ($f in "README.md", "INSTALL.txt", "LICENSE.GPL2", "LICENSE.GPL3", "LICE
 Set-Content "$out\SOURCE.txt"
 
 # Smoke test + parts database, as upstream's release script does: the packaged app must start,
-# index all parts and exit. Run headless with a temporary copy of Qt's offscreen plugin, 15 minute limit.
-Copy-Item "$qtPrefix\plugins\platforms\qoffscreen.dll" "$out\platforms\"
-$env:QT_QPA_PLATFORM = "offscreen"
-$env:QT_LOGGING_RULES = "*.debug=true"  # Fritzing debug output (qDebug) into the log
+# index all parts and exit, within 15 minutes. (Fritzing forces the "windows" Qt platform itself.)
+# It indexes a copy of the parts with malformed XML repaired (see fix_parts_xml.py); the shipped
+# fritzing-parts stays an unmodified clone, which the in-app parts update needs. parts.db stores
+# paths relative to the parts folder, so the database works in the shipped folder.
+$partsFixed = Join-Path ([IO.Path]::GetTempPath()) "fritzing-parts-fixed-$PID"
+Copy-Item "$out\fritzing-parts" $partsFixed -Recurse -Force
+Run { python -I "$root\fix_parts_xml.py" $partsFixed }
+$env:QT_LOGGING_RULES = "*.debug=false;default.debug=true"  # Fritzing's own qDebug output into the log
 $env:QT_FORCE_STDERR_LOGGING = "1"
+$qtPluginPath = $env:QT_PLUGIN_PATH  # set by install-qt-action; would load Qt's plugins, not the bundled ones
+Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
 $db = "$out\fritzing-parts\parts.db"
 $p = Start-Process "$out\Fritzing.exe" -PassThru -NoNewWindow `
-    -ArgumentList "-db", "`"$db`"", "-pp", "`"$out\fritzing-parts`"", "-f", "`"$out`""
+    -ArgumentList "-db", "`"$db`"", "-pp", "`"$partsFixed`"", "-f", "`"$out`""
 $null = $p.Handle  # without this, ExitCode can be empty after the process ends
 if (-not $p.WaitForExit(900000)) { $p.Kill(); throw "packaged Fritzing did not finish building the parts database in 15 minutes" }
 if ($p.ExitCode -ne 0) { throw "packaged Fritzing failed to start or to build the parts database (exit code $($p.ExitCode))" }
 if (-not (Test-Path $db) -or (Get-Item $db).Length -lt 1MB) { throw "parts database is missing or too small" }
-Remove-Item "$out\platforms\qoffscreen.dll"
-Remove-Item Env:QT_QPA_PLATFORM, Env:QT_LOGGING_RULES, Env:QT_FORCE_STDERR_LOGGING
+Remove-Item Env:QT_LOGGING_RULES, Env:QT_FORCE_STDERR_LOGGING
+if ($qtPluginPath) { $env:QT_PLUGIN_PATH = $qtPluginPath }
+Remove-Item $partsFixed -Recurse -Force
 
 # one .zip per build, so the download is the file itself
 Run { 7z a -tzip -bso0 "$out.zip" $out }

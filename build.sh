@@ -4,7 +4,7 @@
 #
 # usage: bash build.sh <linux|macos> [fritzing-app ref] [platform id, used in file names]
 #   ref: empty or "stable" = newest X.Y.Z release, "develop", or any fritzing-app branch/tag
-# Expects Qt 6 (qmake on PATH), a C++ toolchain, cmake, git, curl, unzip, perl, and
+# Expects Qt 6 (qmake on PATH), a C++ toolchain, cmake, git, curl, unzip, python3, and
 # OpenSSL 3 + pkg-config (Linux: libssl-dev, macOS: brew openssl@3).
 # Dependencies are placed as siblings of fritzing-app, as phoenix.pro's *.pri detect scripts expect.
 # Folders that already exist are reused (the workflow caches them).
@@ -16,7 +16,7 @@ PLATFORM="${3:-$OS}"
 ROOT="$(pwd)"
 JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 
-for tool in qmake lrelease cmake git curl unzip tar make perl; do
+for tool in qmake lrelease cmake git curl unzip tar make python3; do
   command -v "$tool" >/dev/null || { echo "'$tool' not found in PATH" >&2; exit 1; }
 done
 
@@ -179,13 +179,24 @@ copy_resources() { # same set as upstream's release scripts
   license_files "$1"
 }
 
+# A copy of the parts with malformed XML repaired (see fix_parts_xml.py). Fritzing indexes this copy;
+# the shipped fritzing-parts stays an unmodified clone, which the in-app parts update needs.
+# parts.db stores paths relative to the parts folder, so the database works in the shipped folder.
+fixed_parts_copy() { # $1 = shipped fritzing-parts; prints the copy's path
+  local work; work="$(mktemp -d)"
+  cp -R "$1" "$work/fritzing-parts"
+  python3 -I "$ROOT/fix_parts_xml.py" "$work/fritzing-parts" >&2
+  echo "$work/fritzing-parts"
+}
+
 # Smoke test + parts database, as upstream's release scripts do: the packaged app must start,
 # index all parts and exit. Any missing library or plugin fails the build here, not on the user's PC.
-build_parts_db() { # $1 = fritzing executable, $2 = release folder (holds fritzing-parts, sketches, ...)
-  local db="$2/fritzing-parts/parts.db" pid n status=0
-  # Fritzing's debug output goes through qDebug; send it to the log
-  QT_LOGGING_RULES='*.debug=true' QT_FORCE_STDERR_LOGGING=1 \
-    "$1" -db "$db" -pp "$2/fritzing-parts" -f "$2" &
+build_parts_db() { # $1 = fritzing executable, $2 = release folder, $3 = parts folder to index, $4 = output db
+  local db="$4" pid n status=0
+  # Fritzing's own qDebug output into the log (default category only, not Qt's internals).
+  # QT_PLUGIN_PATH from install-qt-action would load Qt's plugins instead of the bundled ones.
+  env -u QT_PLUGIN_PATH QT_LOGGING_RULES='*.debug=false;default.debug=true' QT_FORCE_STDERR_LOGGING=1 \
+    "$1" -db "$db" -pp "$3" -f "$2" &
   pid=$!
   for ((n = 0; n < 900; n++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
   if kill -0 "$pid" 2>/dev/null; then
@@ -238,7 +249,9 @@ if [ "$OS" = linux ]; then
   cp "$APP/Fritzing.sh" "$D/Fritzing"; chmod +x "$D/Fritzing"
   cp "$APP/Fritzing.1" "$APP/org.fritzing.Fritzing.desktop" "$APP/org.fritzing.Fritzing.appdata.xml" "$D/"
   mkdir -p "$D/icons" && cp "$APP"/resources/system_icons/linux/* "$D/icons/"
-  ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen; build_parts_db "$L/Fritzing" "$D" )
+  PARTS_FIXED="$(fixed_parts_copy "$D/fritzing-parts")"
+  ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen
+    build_parts_db "$L/Fritzing" "$D" "$PARTS_FIXED" "$D/fritzing-parts/parts.db" )
   strip "$L/Fritzing"
 
   # Turn the folder into an AppImage: one file that runs on most distros. The upstream launcher
@@ -258,10 +271,8 @@ if [ "$OS" = linux ]; then
   # smoke test the AppImage itself: it must start and index the parts
   SMOKE="$(mktemp -d)"
   ( export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen; cd "$SMOKE"
-    perl -e 'alarm shift; exec @ARGV' 600 "$OUT/$NAME.AppImage" -db "$SMOKE/parts.db" -pp "$D/fritzing-parts" -f "$D" ) \
-    || { echo "the AppImage failed to start" >&2; exit 1; }
-  [ "$(wc -c < "$SMOKE/parts.db")" -gt 1000000 ] || { echo "the AppImage did not build a parts database" >&2; exit 1; }
-  rm -rf "$SMOKE" "$D"
+    build_parts_db "$OUT/$NAME.AppImage" "$D" "$PARTS_FIXED" "$SMOKE/parts.db" )
+  rm -rf "$SMOKE" "$D" "$(dirname "$PARTS_FIXED")"
 
 else # macos
   BUNDLE="$ROOT/release64/Fritzing.app"  # DESTDIR from phoenix.pro
@@ -275,7 +286,10 @@ else # macos
   macdeployqt "$D/Fritzing.app" -libpath="$QT_PREFIX/lib" -libpath="$QUAZIP_DIR/lib" -libpath="$ROOT/ngspice-42/lib"
   # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
   find "$D/Fritzing.app/Contents/PlugIns/sqldrivers" -type f ! -name 'libqsqlite.dylib' -delete
-  build_parts_db "$S/Fritzing" "$S"  # as upstream: with the normal (cocoa) platform; runners have a GUI session
+  # as upstream: with the normal (cocoa) platform; runners have a GUI session
+  PARTS_FIXED="$(fixed_parts_copy "$S/fritzing-parts")"
+  build_parts_db "$S/Fritzing" "$S" "$PARTS_FIXED" "$S/fritzing-parts/parts.db"
+  rm -rf "$(dirname "$PARTS_FIXED")"
   # unsigned arm64 binaries do not launch at all; an ad-hoc signature fixes that
   codesign --force --deep --sign - "$D/Fritzing.app"
   codesign --verify --deep --strict "$D/Fritzing.app"

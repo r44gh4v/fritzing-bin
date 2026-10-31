@@ -20,7 +20,7 @@ on:
   # Development: every push to a work branch that touches the build builds everything
   push:
     branches-ignore: [main]
-    paths: [build.sh, build.ps1, SOURCE.txt, .github/workflows/fritzing.yml]
+    paths: [build.sh, build.ps1, fix_parts_xml.py, SOURCE.txt, .github/workflows/fritzing.yml]
 
 # A newer run of the same build on the same branch cancels the older one
 concurrency:
