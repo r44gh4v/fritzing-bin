@@ -204,7 +204,7 @@ if (-not $crt) { throw "Visual C++ runtime not found in $env:VCToolsRedistDir" }
 Copy-Item "$($crt.FullName)\*.dll" $out
 # windeployqt does not follow non-Qt DLLs: deploy QuaZip's Qt dependencies too
 foreach ($dll in Get-ChildItem "$out\quazip*.dll") {
-    Run { windeployqt --release --no-translations --dir $out $dll.FullName }
+    Run { windeployqt --release --no-compiler-runtime --no-translations --dir $out $dll.FullName }
 }
 Copy-Item "$ngspiceDir\bin\*.dll" $out
 # Fritzing only uses SQLite; the other SQL drivers need client libraries that are not bundled
