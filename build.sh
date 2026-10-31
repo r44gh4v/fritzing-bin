@@ -281,15 +281,11 @@ else # macos
   find "$D/Fritzing.app/Contents/PlugIns/sqldrivers" -type f ! -name 'libqsqlite.dylib' -delete
 
   # every binary in the app must contain both Intel and Apple Silicon code
-  # a function, not inline: macOS bash 3.2 misparses `case` inside $( )
   thin_binaries() {
     find "$D/Fritzing.app" -type f \( -perm -u+x -o -name '*.dylib' \) -print0 | while IFS= read -r -d '' f; do
       local a; a="$(lipo -archs "$f" 2>/dev/null || true)"
       [ -n "$a" ] || continue  # not a Mach-O file
-      case " $a " in
-        *" x86_64 "*" arm64 "* | *" arm64 "*" x86_64 "*) ;;
-        *) echo "$f: $a" ;;
-      esac
+      [[ " $a " == *" x86_64 "* && " $a " == *" arm64 "* ]] || echo "$f: $a"
     done
   }
   THIN="$(thin_binaries)"
