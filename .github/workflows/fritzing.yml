@@ -3,23 +3,28 @@ name: fritzing
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: "Which build do you want?"
-        type: choice
-        default: "Windows (64-bit)"
-        options:
-          - "Windows (64-bit)"
-          - "macOS (Apple Silicon)"
-          - "macOS (Intel)"
-          - "Linux (x64)"
-          - "All macOS"
-          - "Everything"
+      windows:
+        description: "Windows"
+        type: boolean
+        default: false
+      macos_arm64:
+        description: "Mac with an Apple chip (M1, M2, M3, M4 ...)"
+        type: boolean
+        default: false
+      macos_x64:
+        description: "Mac with an Intel chip"
+        type: boolean
+        default: false
+      linux:
+        description: "Linux"
+        type: boolean
+        default: false
       version:
         description: "Fritzing version. Leave empty for the latest stable version."
         required: false
 
 concurrency:
-  group: fritzing-${{ github.ref }}-${{ inputs.platform }}
+  group: fritzing-${{ github.ref }}-${{ inputs.windows }}-${{ inputs.macos_arm64 }}-${{ inputs.macos_x64 }}-${{ inputs.linux }}
   cancel-in-progress: true
 
 permissions:
@@ -38,20 +43,20 @@ jobs:
     steps:
       - id: plan
         env:
-          CHOICE: ${{ inputs.platform }}
+          SELECTED: ${{ toJSON(inputs) }}
         run: |
           all='[
-            {"id":"windows-x64", "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",   "qt_host":"windows", "qt_arch":"win64_msvc2022_64"},
-            {"id":"macos-arm64", "label":"macOS (Apple Silicon)", "group":"macos",   "runner":"macos-15",       "qt_host":"mac",     "qt_arch":"clang_64"},
-            {"id":"macos-x64",   "label":"macOS (Intel)",         "group":"macos",   "runner":"macos-15-intel", "qt_host":"mac",     "qt_arch":"clang_64"},
-            {"id":"linux-x64",   "label":"Linux (x64)",           "group":"linux",   "runner":"ubuntu-22.04",   "qt_host":"linux",   "qt_arch":"linux_gcc_64"}
+            {"id":"windows-x64", "input":"windows",     "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",   "qt_host":"windows", "qt_arch":"win64_msvc2022_64"},
+            {"id":"macos-arm64", "input":"macos_arm64", "label":"macOS (Apple Silicon)", "group":"macos",   "runner":"macos-15",       "qt_host":"mac",     "qt_arch":"clang_64"},
+            {"id":"macos-x64",   "input":"macos_x64",   "label":"macOS (Intel)",         "group":"macos",   "runner":"macos-15-intel", "qt_host":"mac",     "qt_arch":"clang_64"},
+            {"id":"linux-x64",   "input":"linux",       "label":"Linux (x64)",           "group":"linux",   "runner":"ubuntu-22.04",   "qt_host":"linux",   "qt_arch":"linux_gcc_64"}
           ]'
-          case "$CHOICE" in
-            "Everything") filter='.' ;;
-            "All macOS")  filter='map(select(.group=="macos"))' ;;
-            *)            filter='map(select(.label==env.CHOICE))' ;;
-          esac
-          echo "matrix=$(jq -c "$filter" <<<"$all")" >> "$GITHUB_OUTPUT"
+          matrix="$(jq -c --argjson sel "$SELECTED" 'map(select($sel[.input] == true or $sel[.input] == "true"))' <<<"$all")"
+          if [ "$matrix" = "[]" ]; then
+            echo "::error::Select at least one computer (Windows, Mac or Linux), then click Run workflow again."
+            exit 1
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
