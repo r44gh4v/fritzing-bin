@@ -20,8 +20,8 @@ You need a free [GitHub account](https://github.com/signup). You do not need to 
 6. Tick the box for your computer. You can tick more than one box. You get one file for each box. If you tick no box, the run stops with a message.
 
    - **Windows**
-   - **Mac with an Apple chip (M1, M2, M3, M4 ...)**
-   - **Mac with an Intel chip**
+   - **MacOS (Apple Silicon)**: Macs from 2020 on with an M1, M2, M3 or M4 chip
+   - **MacOS (Intel)**: older Macs with an Intel chip
    - **Linux**
 
    Not sure which Mac you have? Click the Apple menu, then **About This Mac**. Look at **Chip** or **Processor**.
