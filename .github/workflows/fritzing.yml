@@ -101,7 +101,7 @@ jobs:
         run: |
           sudo apt-get -o Acquire::Retries=3 update -q
           sudo apt-get -o Acquire::Retries=3 install -yq build-essential cmake pkg-config unzip libssl-dev libudev-dev \
-            libgl1-mesa-dev libfontconfig1-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            gdb libgl1-mesa-dev libfontconfig1-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
             libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
 
       - name: Install build tools (macOS)

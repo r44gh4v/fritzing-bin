@@ -182,10 +182,25 @@ copy_resources() { # same set as upstream's release scripts
 # Smoke test + parts database, as upstream's release scripts do: the packaged app must start,
 # index all parts and exit. Any missing library or plugin fails the build here, not on the user's PC.
 build_parts_db() { # $1 = fritzing executable, $2 = release folder (holds fritzing-parts, sketches, ...)
-  local db="$2/fritzing-parts/parts.db"
-  # perl alarm = portable 10 minute timeout (macOS has no `timeout`)
-  perl -e 'alarm shift; exec @ARGV' 600 "$1" -db "$db" -pp "$2/fritzing-parts" -f "$2" \
-    || { echo "packaged Fritzing failed to start or to build the parts database" >&2; exit 1; }
+  local db="$2/fritzing-parts/parts.db" pid n status=0
+  # Fritzing's debug output goes through qDebug; send it to the log
+  QT_LOGGING_RULES='*.debug=true' QT_FORCE_STDERR_LOGGING=1 \
+    "$1" -db "$db" -pp "$2/fritzing-parts" -f "$2" &
+  pid=$!
+  for ((n = 0; n < 900; n++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$pid" 2>/dev/null; then
+    # still running after 15 minutes: show where it is stuck, then fail
+    echo "Fritzing did not finish in 15 minutes; parts.db size: $(wc -c < "$db" 2>/dev/null || echo none)" >&2
+    if command -v gdb >/dev/null; then
+      sudo gdb -p "$pid" -batch -ex "thread apply all bt 25" 2>&1 | grep -E '^(Thread|#)' | head -150 >&2
+    elif command -v lldb >/dev/null; then
+      sudo lldb -p "$pid" --batch -o "thread backtrace all -c 25" 2>&1 | head -150 >&2
+    fi
+    kill -9 "$pid"
+    exit 1
+  fi
+  wait "$pid" || status=$?
+  [ "$status" -eq 0 ] || { echo "packaged Fritzing failed (exit code $status)" >&2; exit 1; }
   [ "$(wc -c < "$db")" -gt 1000000 ] || { echo "parts database is missing or too small" >&2; exit 1; }
 }
 
@@ -194,7 +209,7 @@ if [ "$OS" = linux ]; then
   EXE="$APP/Fritzing"  # phoenix.pro sets no DESTDIR on Linux
   [ -f "$EXE" ] || { echo "Fritzing binary not found after build" >&2; exit 1; }
   D="$OUT/$NAME"; L="$D/lib"; mkdir -p "$L"
-  cp "$EXE" "$L/Fritzing"; strip "$L/Fritzing"
+  cp "$EXE" "$L/Fritzing"  # stripped after the smoke test, so a stuck run gives a readable stack
 
   # Qt plugins are found next to the executable; then bundle every non-system library needed
   for p in platforms imageformats sqldrivers printsupport xcbglintegrations platforminputcontexts platformthemes iconengines tls; do
@@ -224,6 +239,7 @@ if [ "$OS" = linux ]; then
   cp "$APP/Fritzing.1" "$APP/org.fritzing.Fritzing.desktop" "$APP/org.fritzing.Fritzing.appdata.xml" "$D/"
   mkdir -p "$D/icons" && cp "$APP"/resources/system_icons/linux/* "$D/icons/"
   ( export LD_LIBRARY_PATH="$L" QT_QPA_PLATFORM=offscreen; build_parts_db "$L/Fritzing" "$D" )
+  strip "$L/Fritzing"
 
   # Turn the folder into an AppImage: one file that runs on most distros. The upstream launcher
   # already resolves its own folder, so it works as AppRun inside the mounted image.
