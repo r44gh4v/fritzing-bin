@@ -19,10 +19,10 @@ You need a free [GitHub account](https://github.com/signup). You do not need to 
 5. On the right, click **Run workflow**. A small window opens.
 6. Tick the box for your computer. You can tick more than one box. You get one file for each box. If you tick no box, the run stops with a message.
 
-   - **Windows**
+   - **Windows (x64)**: all normal Windows 10 and 11 computers
    - **MacOS (Apple Silicon)**: Macs from 2020 on with an M1, M2, M3 or M4 chip
    - **MacOS (Intel)**: older Macs with an Intel chip
-   - **Linux**
+   - **Linux (x64)**: Ubuntu 22.04 or newer, or a distribution of the same age
 
    Not sure which Mac you have? Click the Apple menu, then **About This Mac**. Look at **Chip** or **Processor**.
 
@@ -79,7 +79,7 @@ The Linux build needs Ubuntu 22.04 or newer, or a different distribution of the 
 These computers are not supported:
 
 - **32-bit Windows.** Fritzing needs Qt 6, which does not support it.
-- **Windows on ARM.** The simulator library does not exist for it. The Windows (64-bit) build runs on these computers through emulation.
+- **Windows on ARM.** The simulator library does not exist for it. The Windows (x64) build runs on these computers through emulation.
 - **Linux on ARM.**
 
 ## Licenses

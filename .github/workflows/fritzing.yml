@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       windows:
-        description: "Windows"
+        description: "Windows (x64)"
         type: boolean
         default: false
       macos_arm64:
@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       linux:
-        description: "Linux"
+        description: "Linux (x64)"
         type: boolean
         default: false
       version:
@@ -46,7 +46,7 @@ jobs:
           SELECTED: ${{ toJSON(inputs) }}
         run: |
           all='[
-            {"id":"windows-x64", "input":"windows",     "label":"Windows (64-bit)",      "group":"windows", "runner":"windows-2025",   "qt_host":"windows", "qt_arch":"win64_msvc2022_64"},
+            {"id":"windows-x64", "input":"windows",     "label":"Windows (x64)",         "group":"windows", "runner":"windows-2025",   "qt_host":"windows", "qt_arch":"win64_msvc2022_64"},
             {"id":"macos-arm64", "input":"macos_arm64", "label":"MacOS (Apple Silicon)", "group":"macos",   "runner":"macos-15",       "qt_host":"mac",     "qt_arch":"clang_64"},
             {"id":"macos-x64",   "input":"macos_x64",   "label":"MacOS (Intel)",         "group":"macos",   "runner":"macos-15-intel", "qt_host":"mac",     "qt_arch":"clang_64"},
             {"id":"linux-x64",   "input":"linux",       "label":"Linux (x64)",           "group":"linux",   "runner":"ubuntu-22.04",   "qt_host":"linux",   "qt_arch":"linux_gcc_64"}
